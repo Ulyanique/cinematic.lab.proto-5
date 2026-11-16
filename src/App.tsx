@@ -4,8 +4,8 @@ import { Score } from "./intro/audio";
 import { HERO_COUNT, TL } from "./intro/timeline";
 import { clamp, easeOutCubic, smoothstep } from "./intro/math";
 
-const BRAND = "CIRCINUS";
-const TAGLINE = "PRECISION   ·   IN EVERY ARC";
+const BRAND = "ЯНТАРНЫЙ ЦИРКУЛЬ";
+const TAGLINE = "Вечер ретроспектива";
 const CARD_TITLE = "CINEMATIC LAB";
 const CARD_SUB = "PROTO · 05";
 
@@ -242,7 +242,7 @@ export default function App() {
       {/* brand title under the compass – always mounted, painted from the film clock */}
       <div className="brand-wrap">
         <div ref={shadeRef} className="brand-shade" />
-        <div className="brand" aria-label={BRAND}>
+        <div className="brand brand-long" aria-label={BRAND}>
           {BRAND.split("").map((ch, i) => (
             <span
               key={i}

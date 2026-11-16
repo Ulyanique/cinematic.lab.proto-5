@@ -616,12 +616,12 @@ export class IntroEngine {
     U.uBlastT.value = post ? tl : -1;
     U.uEdge.value = 0.72 + k2 * 0.45 + (post ? 0.55 * Math.exp(-tl * 2.0) : 0);
     U.uFogDensity.value = lerp(0.0092, 0.0068, smoothstep(0, 9, t));
-    U.uDim.value = post ? lerp(1, 0.38, smoothstep(1.5, 5, tl)) : 1;
+    U.uDim.value = post ? lerp(1, 0.22, smoothstep(1.5, 5, tl)) : 1;
     U.uBlastLight.value = post ? 40 * Math.exp(-tl * 3.4) + 1.0 * Math.exp(-tl * 0.8) + 0.3 : 1.6 * k2;
 
     this.sky.position.copy(cam.position);
     this.skyMat.uniforms.uGlow.value = k2 * 0.35 + (post ? 1.3 * Math.exp(-tl * 1.5) : 0);
-    this.skyMat.uniforms.uDim.value = lerp(1, 0.62, smoothstep(TL.logoText, TL.end, t));
+    this.skyMat.uniforms.uDim.value = lerp(1, 0.42, smoothstep(TL.logoText, TL.end, t));
 
     // ------------------------------------------------ monoliths
     let chapter = 0;
