@@ -703,14 +703,18 @@ export class IntroEngine {
       const radius = 42 + 4 * Math.sin(phase * 1.7);
       return out.set(
         Math.sin(phase) * radius,
-        10 + 5 * Math.sin(phase * 1.15),
+        7 + 4 * Math.sin(phase * 1.15),
         Math.cos(phase) * radius
       );
     };
     const pathAt = (u: number, out: THREE.Vector3, offset = 0) => {
       if (u < 0.24) {
         const q = smoothstep(0, 1, u / 0.24);
-        out.set(0, 10 + 2 * Math.sin(q * Math.PI), THREE.MathUtils.lerp(150, 42, q));
+        out.set(
+          THREE.MathUtils.lerp(-9, 0, q),
+          THREE.MathUtils.lerp(6, 7, q) + 0.6 * Math.sin(q * Math.PI),
+          THREE.MathUtils.lerp(150, 42, q)
+        );
       } else if (u < 0.84) {
         orbitAt((u - 0.24) / 0.60, out);
       } else {
@@ -830,9 +834,9 @@ export class IntroEngine {
       h.screenMat.uniforms.uOn.value = on;
       h.screenMat.uniforms.uFocus.value = fAll;
       const eruption = Math.sin(clamp(rise * 1.15) * Math.PI);
-      const beamI = eruption * 1.0 + (rise >= 1 ? 0.14 : 0) * rise + focus * 0.12;
+      const beamI = eruption * 0.72 + (rise >= 1 ? 0.10 : 0) * rise + focus * 0.10;
       h.beamMat.uniforms.uI.value = beamI;
-      h.glowMat.uniforms.uI.value = eruption * 0.9 + 0.22 * rise + focus * 0.15;
+      h.glowMat.uniforms.uI.value = eruption * 0.65 + 0.18 * rise + focus * 0.12;
     }
     this.sceneryMat.uniforms.uGlow.value = 0.85 + k2 * 0.8 + (post ? 1.2 * expl : 0);
 
