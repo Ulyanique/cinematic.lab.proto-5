@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IntroEngine, Stage } from "./intro/Engine";
-import { Score } from "./intro/audio";
 import { HERO_COUNT, TL } from "./intro/timeline";
 import { clamp, easeOutCubic, smoothstep } from "./intro/math";
 
@@ -29,8 +28,6 @@ export default function App() {
   const timeRef = useRef<HTMLSpanElement>(null);
   const seekingRef = useRef(false);
   const engineRef = useRef<IntroEngine | null>(null);
-  const scoreRef = useRef<Score | null>(null);
-  const soundRef = useRef(false);
 
   // overlays are painted straight from the engine clock (transform / opacity only)
   const cardRef = useRef<HTMLDivElement>(null);
@@ -44,27 +41,7 @@ export default function App() {
 
   const [stage, setStage] = useState<Stage>("approach");
   const [chapter, setChapter] = useState(0);
-  const [sound, setSound] = useState(false);
   const [paused, setPaused] = useState(false);
-
-  const getTime = useCallback(() => engineRef.current?.time ?? 0, []);
-
-  const enableSound = useCallback(() => {
-    if (soundRef.current) return;
-    soundRef.current = true;
-    setSound(true);
-    scoreRef.current?.start(getTime(), getTime);
-  }, [getTime]);
-
-  const toggleSound = useCallback(() => {
-    if (soundRef.current) {
-      soundRef.current = false;
-      setSound(false);
-      scoreRef.current?.stop();
-    } else {
-      enableSound();
-    }
-  }, [enableSound]);
 
   const paint = useCallback((t: number) => {
     // ---- opening title card
@@ -119,8 +96,6 @@ export default function App() {
     if (!mountRef.current) return;
     let cancelled = false;
     let engine: IntroEngine | null = null;
-    const score = new Score();
-    scoreRef.current = score;
     const q = new URLSearchParams(window.location.search).get("t");
     const fixed = q !== null && !Number.isNaN(parseFloat(q)) ? parseFloat(q) : null;
 
@@ -143,28 +118,12 @@ export default function App() {
       engineRef.current = engine;
     });
 
-    // browsers only allow audio after a gesture: start the score on the first interaction
-    const onGesture = () => enableSound();
-    window.addEventListener("pointerdown", onGesture, { once: true });
-    window.addEventListener("keydown", onGesture, { once: true });
-    // keep sound and picture in lock-step when the tab is hidden
-    const onVis = () => {
-      if (!soundRef.current) return;
-      if (document.hidden) score.suspend();
-      else score.resume();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
     return () => {
       cancelled = true;
-      window.removeEventListener("pointerdown", onGesture);
-      window.removeEventListener("keydown", onGesture);
-      document.removeEventListener("visibilitychange", onVis);
-      score.stop();
       engine?.dispose();
       engineRef.current = null;
     };
-  }, [enableSound, paint]);
+  }, [paint]);
 
   const togglePlayback = () => {
     const engine = engineRef.current;
@@ -182,7 +141,6 @@ export default function App() {
     engineRef.current?.restart();
     setPaused(false);
     setChapter(0);
-    if (soundRef.current) scoreRef.current?.start(0, getTime);
   };
 
   return (
@@ -215,29 +173,6 @@ export default function App() {
           <span className="ml-4 opacity-70">VIDEO</span>
         </div>
       </div>
-
-      {/* sound toggle */}
-      <button
-        onPointerDown={(e) => e.stopPropagation()} // the global first-gesture hook must not fight the toggle
-        onClick={toggleSound}
-        className="absolute right-[4vw] z-20 flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/30 px-4 py-2 font-mono text-[10px] tracking-[0.3em] text-amber-200/90 backdrop-blur-sm transition hover:border-amber-300/80 hover:bg-amber-300/10"
-        style={{ bottom: "18px" }}
-      >
-        <span className="flex h-3 items-end gap-[2px]">
-          {[0, 1, 2, 3].map((i) => (
-            <span
-              key={i}
-              className="w-[2px] origin-bottom bg-amber-300"
-              style={{
-                height: 12,
-                transform: sound ? undefined : "scaleY(0.25)",
-                animation: sound ? `eq ${0.7 + i * 0.17}s ease-in-out ${i * 0.1}s infinite alternate` : undefined,
-              }}
-            />
-          ))}
-        </span>
-        {sound ? "SOUND ON" : "SOUND OFF"}
-      </button>
 
       {/* brand title under the compass – always mounted, painted from the film clock */}
       <div className="brand-wrap">

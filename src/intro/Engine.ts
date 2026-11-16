@@ -84,6 +84,12 @@ export class IntroEngine {
   private ring: THREE.Mesh;
   private ringMat: THREE.ShaderMaterial;
   private blastMat: THREE.ShaderMaterial;
+  private cometTrail: THREE.Line;
+  private cometTrailMat: THREE.LineBasicMaterial;
+  private cometParticles: THREE.Points;
+  private cometParticleSeeds: Float32Array;
+  private cometHead: THREE.Mesh;
+  private cometHeadMat: THREE.ShaderMaterial;
   private logo: CompassLogo;
 
   private raf = 0;
@@ -342,6 +348,53 @@ export class IntroEngine {
       this.scene.add(pts);
     }
 
+    // Camera-facing comet streak: a smooth luminous arc plus individually drifting sparks.
+    {
+      const trailCount = 48;
+      const trailGeo = new THREE.BufferGeometry();
+      trailGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(trailCount * 3), 3));
+      trailGeo.setDrawRange(0, trailCount);
+      this.cometTrailMat = new THREE.LineBasicMaterial({
+        color: 0xffd77a,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      });
+      this.cometTrail = new THREE.Line(trailGeo, this.cometTrailMat);
+      this.cometTrail.renderOrder = 18;
+      this.cometTrail.frustumCulled = false;
+      this.cometTrail.visible = false;
+      this.scene.add(this.cometTrail);
+
+      const particleCount = 220;
+      const particleGeo = new THREE.BufferGeometry();
+      particleGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(particleCount * 3), 3));
+      this.cometParticleSeeds = new Float32Array(particleCount * 3);
+      const seedRand = mulberry32(7719);
+      for (let i = 0; i < particleCount; i++) {
+        this.cometParticleSeeds[i * 3] = seedRand();
+        this.cometParticleSeeds[i * 3 + 1] = seedRand() * 2 - 1;
+        this.cometParticleSeeds[i * 3 + 2] = seedRand() * 2 - 1;
+      }
+      const sparks = new THREE.PointsMaterial({
+        color: 0xffc85c,
+        size: 3.2,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+      });
+      this.cometParticles = new THREE.Points(particleGeo, sparks);
+      this.cometParticles.renderOrder = 19;
+      this.cometParticles.frustumCulled = false;
+      this.cometParticles.visible = false;
+      this.scene.add(this.cometParticles);
+    }
+
     // ---------------------------------------------------------------- core / fireball / shock
     const coreMaterial = (a: THREE.Color, b: THREE.Color) =>
       additive(
@@ -393,6 +446,14 @@ export class IntroEngine {
     this.flare.renderOrder = 20;
     this.flare.frustumCulled = false;
     this.scene.add(this.flare);
+
+    this.cometHeadMat = flareMaterial(0.9, 0.22);
+    this.cometHeadMat.depthTest = false;
+    this.cometHead = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.cometHeadMat);
+    this.cometHead.renderOrder = 20;
+    this.cometHead.frustumCulled = false;
+    this.cometHead.visible = false;
+    this.scene.add(this.cometHead);
 
     this.haloMat = flareMaterial(1.0, 0.25);
     this.halo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.haloMat);
@@ -578,6 +639,57 @@ export class IntroEngine {
     m.scale.set(size, size, 1);
   }
 
+  private updateComet(t: number) {
+    const startT = TL.explode - 3.2;
+    const active = t >= startT && t < TL.explode;
+    this.cometTrail.visible = active;
+    this.cometParticles.visible = active;
+    this.cometHead.visible = active;
+    if (!active) return;
+
+    const raw = clamp((t - startT) / (TL.explode - startT));
+    const progress = smoothstep(0, 1, raw);
+    const target = BLAST_POS.clone().project(this.camera);
+    const sx = -1.15;
+    const sy = target.y + 0.22;
+    const cx = (sx + target.x) * 0.5;
+    const cy = (sy + target.y) * 0.5 + 0.16;
+    const z = target.z;
+    const at = (u: number, out: THREE.Vector3) => {
+      const v = 1 - u;
+      const x = v * v * sx + 2 * v * u * cx + u * u * target.x;
+      const y = v * v * sy + 2 * v * u * cy + u * u * target.y;
+      return out.set(x, y, z).unproject(this.camera);
+    };
+
+    const linePos = this.cometTrail.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const trailStart = Math.max(0, progress - 0.42);
+    for (let i = 0; i < linePos.count; i++) {
+      const u = trailStart + (progress - trailStart) * (i / (linePos.count - 1));
+      const p = at(u, this.tmpV);
+      linePos.setXYZ(i, p.x, p.y, p.z);
+    }
+    linePos.needsUpdate = true;
+    this.cometTrailMat.opacity = 0.2 + 0.72 * Math.min(1, raw * 5);
+
+    const particlePos = this.cometParticles.geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let i = 0; i < particlePos.count; i++) {
+      const seed = this.cometParticleSeeds[i * 3];
+      const spreadX = this.cometParticleSeeds[i * 3 + 1];
+      const spreadY = this.cometParticleSeeds[i * 3 + 2];
+      const u = Math.max(0, progress - seed * 0.42);
+      const p = at(u, this.tmpV);
+      const spread = 0.003 + seed * 0.012;
+      particlePos.setXYZ(i, p.x + spreadX * spread, p.y + spreadY * spread, p.z);
+    }
+    particlePos.needsUpdate = true;
+
+    const head = at(progress, this.tmpV);
+    this.cometHead.position.copy(head);
+    this.billboard(this.cometHead, 2.2);
+    this.cometHeadMat.uniforms.uI.value = 0.8 + 0.5 * Math.sin(t * 28);
+  }
+
   private apply(t: number, warm = false) {
     const U = this.U;
     const tl = t - TL.explode;
@@ -607,6 +719,7 @@ export class IntroEngine {
     cam.rotateZ(this.cam.roll);
     cam.fov = this.cam.fov;
     cam.updateProjectionMatrix();
+    this.updateComet(t);
     // fades that must fully decay after the blast (the raw implode factor stays at 1 forever)
     const kFx = post ? Math.exp(-tl * 1.1) : kImp;
 
@@ -711,7 +824,7 @@ export class IntroEngine {
     pu.uAber.value = 0.0004 + kFx * kFx * 0.004 + (post ? 0.012 * Math.exp(-tl * 2.2) : 0);
     pu.uZoom.value = post ? 0.34 * Math.exp(-tl * 3.0) : 0.07 * k3;
     pu.uVig.value = 0.55;
-    pu.uGrain.value = 0.032;
+    pu.uGrain.value = 0;
     pu.uFade.value = warm ? 1 : 1 - smoothstep(0.6, 3.4, t);
     pu.uShockR.value = post ? tl * 0.78 : 0;
     pu.uShockAmp.value = post ? Math.exp(-tl * 1.7) : 0;
