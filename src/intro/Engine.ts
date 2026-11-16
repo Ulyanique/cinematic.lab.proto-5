@@ -89,13 +89,11 @@ export class IntroEngine {
   private cometParticles: THREE.Points;
   private cometParticleSeeds: Float32Array;
   private cometHead: THREE.Mesh;
-  private cometHeadMat: THREE.ShaderMaterial;
+  private cometHeadMat: THREE.MeshBasicMaterial;
   private cometP0 = new THREE.Vector3();
   private cometP1 = new THREE.Vector3();
   private cometP2 = new THREE.Vector3();
-  private cometForward = new THREE.Vector3();
-  private cometRight = new THREE.Vector3();
-  private cometUp = new THREE.Vector3();
+  private cometTangent = new THREE.Vector3();
   private logo: CompassLogo;
 
   private raf = 0;
@@ -483,9 +481,15 @@ export class IntroEngine {
     this.flare.frustumCulled = false;
     this.scene.add(this.flare);
 
-    this.cometHeadMat = flareMaterial(0.9, 0.22);
-    this.cometHeadMat.depthTest = true;
-    this.cometHead = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.cometHeadMat);
+    this.cometHeadMat = new THREE.MeshBasicMaterial({
+      color: 0xffd77a,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthTest: true,
+      depthWrite: false,
+    });
+    this.cometHead = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 1), this.cometHeadMat);
     this.cometHead.renderOrder = 20;
     this.cometHead.frustumCulled = false;
     this.cometHead.visible = false;
@@ -676,8 +680,8 @@ export class IntroEngine {
   }
 
   private updateComet(t: number) {
-    // The comet is a world-space object: the camera can pass it, terrain can occlude it,
-    // and the arc always terminates at the actual 3D blast position.
+    // A fixed world-space orbit, independent of the camera: the spark circles around
+    // the monolith ring from different sides before diving into the central blast point.
     const active = t >= 0 && t < TL.explode;
     for (const trail of this.cometTrails) trail.visible = active;
     this.cometParticles.visible = active;
@@ -685,24 +689,40 @@ export class IntroEngine {
     if (!active) return;
 
     const progress = clamp(t / TL.explode);
-    this.camera.getWorldDirection(this.cometForward).normalize();
-    this.cometRight.crossVectors(this.cometForward, this.camera.up).normalize();
-    this.cometUp.copy(this.camera.up).normalize();
-    this.cometP0.copy(this.camera.position).addScaledVector(this.cometForward, 24);
-    this.cometP0.addScaledVector(this.cometRight, -2.5);
-    this.cometP1.copy(this.cometP0).addScaledVector(this.cometForward, 14);
-    this.cometP1.addScaledVector(this.cometRight, 11).addScaledVector(this.cometUp, 5);
-    this.cometP2.copy(BLAST_POS).add(new THREE.Vector3(0, 9, 15));
-
-    const at = (u: number, out: THREE.Vector3, offset = 0) => {
-      const v = 1 - u;
-      out.copy(this.cometP0).multiplyScalar(v * v * v)
-        .addScaledVector(this.cometP1, 3 * v * v * u)
-        .addScaledVector(this.cometP2, 3 * v * u * u)
-        .addScaledVector(BLAST_POS, u * u * u);
+    const orbitAt = (q: number, out: THREE.Vector3) => {
+      const phase = q * Math.PI * 2 * 1.45;
+      const radius = 42 + 4 * Math.sin(phase * 1.7);
+      return out.set(
+        Math.sin(phase) * radius,
+        10 + 5 * Math.sin(phase * 1.15),
+        Math.cos(phase) * radius
+      );
+    };
+    const pathAt = (u: number, out: THREE.Vector3, offset = 0) => {
+      if (u < 0.14) {
+        const q = smoothstep(0, 1, u / 0.14);
+        out.set(0, 10 + 2 * Math.sin(q * Math.PI), THREE.MathUtils.lerp(150, 42, q));
+      } else if (u < 0.84) {
+        orbitAt((u - 0.14) / 0.70, out);
+      } else {
+        const q = (u - 0.84) / 0.16;
+        orbitAt(1, this.cometP0);
+        orbitAt(1.002, this.cometP1);
+        this.cometTangent.copy(this.cometP1).sub(this.cometP0).normalize();
+        this.cometP1.copy(this.cometP0).addScaledVector(this.cometTangent, 14);
+        this.cometP2.copy(BLAST_POS);
+        this.cometP2.y += 9;
+        this.cometP2.z += 15;
+        const v = 1 - q;
+        out.copy(this.cometP0).multiplyScalar(v * v * v)
+          .addScaledVector(this.cometP1, 3 * v * v * q)
+          .addScaledVector(this.cometP2, 3 * v * q * q)
+          .addScaledVector(BLAST_POS, q * q * q);
+      }
       const envelope = Math.sin(Math.PI * u);
-      out.addScaledVector(this.cometRight, envelope * (0.8 * Math.sin(u * Math.PI * 5 + t * 0.12) + offset));
-      out.addScaledVector(this.cometUp, envelope * (0.6 * Math.sin(u * Math.PI * 3.4 + t * 0.09) + offset * 0.7));
+      out.x += offset + envelope * 1.3 * Math.sin(u * Math.PI * 5 + t * 0.16);
+      out.y += offset * 0.7 + envelope * 0.9 * Math.sin(u * Math.PI * 3.4 + t * 0.12);
+      out.z += envelope * 0.7 * Math.cos(u * Math.PI * 4 + t * 0.1);
       return out;
     };
 
@@ -710,10 +730,10 @@ export class IntroEngine {
     for (let strandIndex = 0; strandIndex < this.cometTrails.length; strandIndex++) {
       const trail = this.cometTrails[strandIndex];
       const linePos = trail.geometry.getAttribute("position") as THREE.BufferAttribute;
-      const offset = strandIndex === 1 ? 0.11 : strandIndex === 2 ? -0.14 : 0;
+      const offset = strandIndex === 1 ? 0.12 : strandIndex === 2 ? -0.15 : 0;
       for (let i = 0; i < linePos.count; i++) {
         const u = trailStart + (progress - trailStart) * (i / (linePos.count - 1));
-        const p = at(u, this.tmpV, offset);
+        const p = pathAt(u, this.tmpV, offset);
         linePos.setXYZ(i, p.x, p.y, p.z);
       }
       linePos.needsUpdate = true;
@@ -724,18 +744,16 @@ export class IntroEngine {
       const seed = this.cometParticleSeeds[i * 3];
       const spreadX = this.cometParticleSeeds[i * 3 + 1];
       const spreadY = this.cometParticleSeeds[i * 3 + 2];
-      const u = progress - seed * 0.52;
-      const p = at(u, this.tmpV);
+      const p = pathAt(progress - seed * 0.52, this.tmpV);
       const spread = 0.12 + seed * 0.45;
       particlePos.setXYZ(i, p.x + spreadX * spread, p.y + spreadY * spread, p.z + (spreadX - spreadY) * spread * 0.4);
     }
     particlePos.needsUpdate = true;
 
-    const head = at(progress, this.tmpV);
-    this.cometHead.position.copy(head);
-    const apparentSize = head.distanceTo(this.camera.position) * 0.018;
-    this.billboard(this.cometHead, apparentSize);
-    this.cometHeadMat.uniforms.uI.value = 0.18 + 0.06 * Math.sin(t * 28);
+    pathAt(progress, this.cometHead.position);
+    const pulse = 0.82 + 0.18 * Math.sin(t * 25);
+    this.cometHead.scale.setScalar(pulse);
+    this.cometHeadMat.opacity = 0.9 * pulse;
   }
 
   private apply(t: number, warm = false) {
