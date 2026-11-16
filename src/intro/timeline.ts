@@ -27,7 +27,9 @@ export interface HeroPlacement {
 export function heroPlacement(i: number): HeroPlacement {
   const rand = mulberry32(900 + i * 17);
   const theta = ((18 + 36 * i) * Math.PI) / 180 + (rand() - 0.5) * 0.06;
-  const radius = 27.5 + (i % 3) * 1.6 + rand() * 1.2;
+  // Extra clearance keeps the wider, near-square video faces from crowding one another
+  // and leaves the camera path inside the ring of monoliths.
+  const radius = 30.5 + (i % 3) * 1.6 + rand() * 1.2;
   const x = Math.sin(theta) * radius;
   const z = Math.cos(theta) * radius;
   // local +Z (screen normal) should look at the centre
@@ -61,7 +63,7 @@ function buildKeys(): Key[] {
     key(2.2, [-4, 3.1, 134], [8, 9, 80], 53, -0.045),
     key(4.4, [5, 4.4, 92], [-3, 10, 46], 51, 0.04),
     key(6.6, [-1.5, 5.6, 58], [0, 10, 16], 49, -0.02),
-    key(7.9, [0.6, 5.0, 33], [4, 8.5, 8], 52, 0.0),
+    key(7.9, [0.6, 5.0, 16], [4, 8.5, 8], 52, 0.0),
   ];
   const deltas = [-0.4, 0.05, -0.35, 0.1, -0.3, 0.15, -0.4, 0.05, -0.35, 0.1];
   const heights = [4.2, 8.5, 3.0, 9.5, 4.5, 8.0, 3.0, 9.0, 4.0, 7.5];
@@ -164,6 +166,18 @@ export const LOGO_POS = V(0, 5.8, 0);
 export function sampleCamera(t: number, out: CamState) {
   sampleRaw(t, out);
   if (t < TL.explode) out.pos.y += liftAt(t);
+
+  // From the first monolith visit onward, keep the camera inside the ring of towers.
+  // This prevents spline overshoot near the 28.7s transition from cutting through facades.
+  if (t >= 7.9 && t < TL.explode) {
+    const radius = Math.hypot(out.pos.x, out.pos.z);
+    const safeRadius = 18;
+    if (radius > safeRadius) {
+      const scale = safeRadius / radius;
+      out.pos.x *= scale;
+      out.pos.z *= scale;
+    }
+  }
   return out;
 }
 
