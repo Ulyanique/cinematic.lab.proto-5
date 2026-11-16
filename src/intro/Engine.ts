@@ -5,7 +5,6 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { buildHero, buildScenery, buildTerrain } from "./geometry";
-import { CompassLogo, createGoldEnv } from "./logo";
 import { clamp, lerp, mulberry32, smoothstep, terrainHeight } from "./math";
 import * as S from "./shaders";
 import { makePlaceholderTexture } from "./textures";
@@ -94,7 +93,8 @@ export class IntroEngine {
   private cometP1 = new THREE.Vector3();
   private cometP2 = new THREE.Vector3();
   private cometTangent = new THREE.Vector3();
-  private logo: CompassLogo;
+  private logo: THREE.Mesh;
+  private logoMaterial: THREE.MeshBasicMaterial;
 
   private raf = 0;
   private clock = 0;
@@ -518,10 +518,24 @@ export class IntroEngine {
     this.scene.add(this.ring);
 
     // ---------------------------------------------------------------- the compass logo
-    const env = createGoldEnv(renderer);
-    this.logo = new CompassLogo(env);
-    this.logo.group.position.copy(new THREE.Vector3(0, 5.8, 0));
-    this.scene.add(this.logo.group);
+    const logoTexture = new THREE.TextureLoader().load("/logo.svg");
+    logoTexture.colorSpace = THREE.SRGBColorSpace;
+    logoTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    this.logoMaterial = new THREE.MeshBasicMaterial({
+      map: logoTexture,
+      color: 0xffe1a0,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    this.logo = new THREE.Mesh(new THREE.PlaneGeometry(11.4, 12), this.logoMaterial);
+    this.logo.position.set(0, 5.8, 0);
+    this.logo.renderOrder = 10;
+    this.logo.frustumCulled = false;
+    this.logo.visible = false;
+    this.scene.add(this.logo);
 
     // ---------------------------------------------------------------- post
     const rt = new THREE.WebGLRenderTarget(w * this.pixelRatio, h * this.pixelRatio, {
@@ -867,8 +881,13 @@ export class IntroEngine {
     this.blastMat.uniforms.uT.value = post ? tl : -1;
     this.blastMat.uniforms.uImplode.value = kImp;
 
-    // ------------------------------------------------ logo
-    this.logo.update(tl, t);
+    // ------------------------------------------------ final SVG emblem: reveal it as a clean, front-facing vector mark
+    const logoReveal = post ? smoothstep(0.12, 1.65, tl) : 0;
+    this.logo.visible = logoReveal > 0.001;
+    this.logoMaterial.opacity = 0.94 * logoReveal;
+    const logoScale = 0.92 + 0.08 * logoReveal;
+    this.logo.scale.set(logoScale, logoScale, 1);
+    this.logo.rotation.y = Math.sin(t * 0.4) * 0.015;
     const haloI = post ? 0.22 * smoothstep(0.4, 2.4, tl) + 0.9 * Math.exp(-Math.pow((tl - 4.05) / 0.4, 2)) : 0;
     this.halo.visible = post;
     this.billboard(this.halo, 20 + Math.sin(t * 0.6) * 0.6);
@@ -941,7 +960,7 @@ export class IntroEngine {
         mat.dispose();
       }
     });
-    this.logo.dispose();
+    this.logoMaterial.map?.dispose();
     this.composer.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
