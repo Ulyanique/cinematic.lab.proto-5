@@ -358,6 +358,7 @@ uniform float uTime;
 varying float vA;
 varying float vHeat;
 varying float vAngle;
+varying float vRand;
 void main(){
   float speed=aInfo.x;
   float rnd=aInfo.y;
@@ -379,13 +380,17 @@ void main(){
     heat=kk;
     sz*=0.6+kk*1.4;
   } else {
-    float drag=1.1+rnd*1.4;
-    float s=(1.-exp(-uT*drag))/drag*speed;
+    // Slightly staggered launch and slower drag leave visible, separate spark trails
+    // instead of merging into one instantaneous white flash.
+    float age=max(uT-rnd*0.10,0.);
+    float launched=step(rnd*0.10,uT);
+    float drag=0.55+rnd*0.7;
+    float s=(1.-exp(-age*drag))/drag*speed;
     pos=uCenter+aDir*s;
-    pos.y-=0.5*uT*uT*(1.5+rnd*3.);
-    a=exp(-uT*(0.55+rnd*0.8));
-    heat=exp(-uT*1.3);
-    sz*=1.0+0.2*sin(uTime*2.+rnd*30.);
+    pos.y-=0.5*age*age*(1.5+rnd*3.);
+    a=launched*exp(-age*(0.24+rnd*0.42));
+    heat=exp(-age*0.72);
+    sz*=1.0+0.25*sin(uTime*2.+rnd*30.);
   }
   vec4 mv=viewMatrix*vec4(pos,1.);
   vec4 clip=projectionMatrix*mv;
@@ -396,9 +401,10 @@ void main(){
   vec2 motion=ahead.xy/max(ahead.w,1e-4)-clip.xy/max(clip.w,1e-4);
   vAngle=atan(motion.y,motion.x);
   float d=max(-mv.z,0.5);
-  gl_PointSize=clamp(sz*uPx*(60./d),1.,40.*uPx);
+  gl_PointSize=clamp(sz*uPx*(78./d),1.,40.*uPx);
   vA=a;
   vHeat=heat;
+  vRand=rnd;
 }
 `;
 
@@ -407,6 +413,7 @@ precision highp float;
 varying float vA;
 varying float vHeat;
 varying float vAngle;
+varying float vRand;
 void main(){
   // Rotate each spark along its projected velocity to read as a short firework trail.
   vec2 p=gl_PointCoord-0.5;
@@ -416,10 +423,12 @@ void main(){
   float a=1.-smoothstep(0.08,0.48,streak);
   float core=1.-smoothstep(0.02,0.16,length(p));
   a=max(a*0.75,core);
-  vec3 hot=vec3(1.0,0.72,0.34);
-  vec3 cool=vec3(1.0,0.24,0.025);
-  vec3 col=mix(cool,hot,clamp(vHeat,0.,1.))*(1.0+vHeat*2.0);
-  gl_FragColor=vec4(col*0.72,a*vA*0.72);
+  vec3 ember=vec3(1.0,0.16,0.025);
+  vec3 gold=vec3(1.0,0.48,0.08);
+  vec3 pale=vec3(1.0,0.82,0.38);
+  vec3 col=mix(ember,gold,smoothstep(0.1,0.7,vHeat));
+  col=mix(col,pale,clamp(vHeat*0.55+fract(vRand*17.)*0.18,0.,0.72));
+  gl_FragColor=vec4(col*(0.85+vHeat*1.1),a*vA*0.82);
 }
 `;
 
