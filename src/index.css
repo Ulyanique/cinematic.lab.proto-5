@@ -85,7 +85,7 @@ canvas {
   position: absolute;
   left: 0;
   right: 0;
-  top: 70%;
+  top: 56%;
   z-index: 12;
   display: flex;
   flex-direction: column;
