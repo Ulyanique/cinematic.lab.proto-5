@@ -530,8 +530,8 @@ export class IntroEngine {
       depthWrite: false,
       toneMapped: false,
     });
-    this.logo = new THREE.Mesh(new THREE.PlaneGeometry(5.13, 5.4), this.logoMaterial);
-    this.logo.position.set(0, 8.5, 0);
+    this.logo = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 4.42), this.logoMaterial);
+    this.logo.position.set(0, 7.35, 0);
     this.logo.renderOrder = 10;
     this.logo.frustumCulled = false;
     this.logo.visible = false;
@@ -583,7 +583,7 @@ export class IntroEngine {
 
   /** current intro time in seconds (accumulated per frame, so hitches never make the film jump) */
   get time() {
-    return this.fixedT !== null ? this.fixedT : this.clock;
+    return clamp(this.fixedT !== null ? this.fixedT : this.clock, 0, TL.end);
   }
 
   restart() {
@@ -680,9 +680,10 @@ export class IntroEngine {
     this.lastTs = ts;
     if (!(dt > 0)) dt = 1 / 60;
     dt = Math.min(dt, 0.25);
-    if (this.fixedT === null) this.clock += dt;
+    if (this.fixedT === null) this.clock = Math.min(TL.end, this.clock + dt);
     this.apply(this.time);
     this.composer.render();
+    if (this.fixedT === null && this.clock >= TL.end) this.pause();
 
     // Keep the composer framebuffer at a stable 1x resolution. Resizing multiple
     // post-processing targets dynamically during playback can flash an empty frame.
@@ -807,12 +808,12 @@ export class IntroEngine {
     U.uBlastT.value = post ? tl : -1;
     U.uEdge.value = 0.72 + k2 * 0.45 + (post ? 0.55 * Math.exp(-tl * 2.0) : 0);
     U.uFogDensity.value = lerp(0.0092, 0.0068, smoothstep(0, 9, t));
-    U.uDim.value = post ? lerp(1, 0.12, smoothstep(1.5, 5, tl)) : 1;
+    U.uDim.value = post ? lerp(1, 0.025, smoothstep(1.5, 5, tl)) : 1;
     U.uBlastLight.value = post ? 40 * Math.exp(-tl * 3.4) + 1.0 * Math.exp(-tl * 0.8) + 0.3 : 1.6 * k2;
 
     this.sky.position.copy(cam.position);
     this.skyMat.uniforms.uGlow.value = k2 * 0.35 + (post ? 1.3 * Math.exp(-tl * 1.5) : 0);
-    this.skyMat.uniforms.uDim.value = lerp(1, 0.22, smoothstep(TL.logoText, TL.end, t));
+    this.skyMat.uniforms.uDim.value = lerp(1, 0.06, smoothstep(TL.logoText, TL.end, t));
 
     // ------------------------------------------------ monoliths
     let chapter = 0;
@@ -842,8 +843,11 @@ export class IntroEngine {
 
     // ------------------------------------------------ arena sigil
     this.sigilMat.uniforms.uDraw.value = clamp((t - 12.5) / 13.5);
+    const sigilFinalFade = 1 - 0.92 * smoothstep(TL.logoText, TL.end, t);
     this.sigilMat.uniforms.uI.value =
-      (0.35 + 0.45 * smoothstep(12, 20, t) + k2 * 1.0) * (post ? 0.6 + 2.2 * Math.exp(-tl * 1.4) : 1);
+      (0.35 + 0.45 * smoothstep(12, 20, t) + k2 * 1.0) *
+      (post ? 0.6 + 2.2 * Math.exp(-tl * 1.4) : 1) *
+      sigilFinalFade;
 
     // ------------------------------------------------ dust
     this.dustMat.uniforms.uAlpha.value = 0.55 + 0.5 * smoothstep(0, 4, t);

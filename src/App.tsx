@@ -106,7 +106,10 @@ export default function App() {
             paint(t);
           },
           onChapter: setChapter,
-          onStage: setStage,
+          onStage: (next) => {
+            setStage(next);
+            if (next === "end") setPaused(true);
+          },
         },
         fixed
       );
@@ -189,14 +192,16 @@ export default function App() {
         className="absolute inset-x-[3vw] bottom-[8px] z-20 flex items-center gap-3 transition-opacity duration-500"
         style={{ opacity: controlsVisible ? 1 : 0, pointerEvents: controlsVisible ? "auto" : "none" }}
       >
-        <button
-          type="button"
-          onClick={togglePlayback}
-          aria-label={paused ? "Продолжить воспроизведение" : "Поставить на паузу"}
-          className="min-w-[94px] rounded-full border border-amber-300/35 bg-black/40 px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] text-amber-200/90 hover:border-amber-300/80"
-        >
-          {paused ? "ПРОДОЛЖИТЬ" : "ПАУЗА"}
-        </button>
+        {stage !== "end" && (
+          <button
+            type="button"
+            onClick={togglePlayback}
+            aria-label={paused ? "Продолжить воспроизведение" : "Поставить на паузу"}
+            className="min-w-[94px] rounded-full border border-amber-300/35 bg-black/40 px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] text-amber-200/90 hover:border-amber-300/80"
+          >
+            {paused ? "ПРОДОЛЖИТЬ" : "ПАУЗА"}
+          </button>
+        )}
         <span ref={timeRef} className="min-w-[92px] font-mono text-[10px] tracking-[0.18em] text-amber-200/80">
           00:00.0 / 00:43.5
         </span>
