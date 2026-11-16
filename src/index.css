@@ -147,9 +147,9 @@ canvas {
   margin-top: clamp(10px, 1.4vw, 22px);
   font-family: "Inter", system-ui, sans-serif;
   font-weight: 300;
-  font-size: clamp(9px, 0.95vw, 15px);
-  letter-spacing: 0.62em;
-  padding-left: 0.62em;
+  font-size: clamp(12px, 1.3vw, 19px);
+  letter-spacing: 0.34em;
+  padding-left: 0.34em;
   color: rgba(255, 224, 168, 0.95);
   white-space: pre;
   opacity: 0;
