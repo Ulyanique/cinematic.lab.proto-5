@@ -90,6 +90,12 @@ export class IntroEngine {
   private cometParticleSeeds: Float32Array;
   private cometHead: THREE.Mesh;
   private cometHeadMat: THREE.ShaderMaterial;
+  private cometP0 = new THREE.Vector3();
+  private cometP1 = new THREE.Vector3();
+  private cometP2 = new THREE.Vector3();
+  private cometForward = new THREE.Vector3();
+  private cometRight = new THREE.Vector3();
+  private cometUp = new THREE.Vector3();
   private logo: CompassLogo;
 
   private raf = 0;
@@ -365,7 +371,7 @@ export class IntroEngine {
           transparent: true,
           opacity: strand.opacity,
           blending: THREE.AdditiveBlending,
-          depthTest: false,
+          depthTest: true,
           depthWrite: false,
         });
         const trail = new THREE.Line(trailGeo, material);
@@ -381,20 +387,41 @@ export class IntroEngine {
       const particleGeo = new THREE.BufferGeometry();
       particleGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(particleCount * 3), 3));
       this.cometParticleSeeds = new Float32Array(particleCount * 3);
+      const sparkStrength = new Float32Array(particleCount);
       const seedRand = mulberry32(7719);
       for (let i = 0; i < particleCount; i++) {
         this.cometParticleSeeds[i * 3] = seedRand();
         this.cometParticleSeeds[i * 3 + 1] = seedRand() * 2 - 1;
         this.cometParticleSeeds[i * 3 + 2] = seedRand() * 2 - 1;
+        sparkStrength[i] = 0.25 + seedRand() * 0.75;
       }
-      const sparks = new THREE.PointsMaterial({
-        color: 0xffc85c,
-        size: 3.2,
-        sizeAttenuation: false,
+      particleGeo.setAttribute("aSpark", new THREE.BufferAttribute(sparkStrength, 1));
+      const sparks = new THREE.ShaderMaterial({
+        vertexShader: `
+          attribute float aSpark;
+          uniform float uTime;
+          varying float vSpark;
+          void main() {
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mv;
+            float twinkle = 0.65 + 0.35 * sin(uTime * (2.0 + aSpark * 5.0) + aSpark * 40.0);
+            vSpark = aSpark * twinkle;
+            gl_PointSize = clamp((1.5 + aSpark * 2.2) * (32.0 / max(-mv.z, 0.5)), 1.0, 7.0);
+          }
+        `,
+        fragmentShader: `
+          precision highp float;
+          varying float vSpark;
+          void main() {
+            float r = length(gl_PointCoord - 0.5);
+            float alpha = 1.0 - smoothstep(0.16, 0.5, r);
+            gl_FragColor = vec4(vec3(1.0, 0.62, 0.24) * vSpark, alpha * vSpark * 0.85);
+          }
+        `,
+        uniforms: { uTime: this.U.uTime },
         transparent: true,
-        opacity: 0.9,
         blending: THREE.AdditiveBlending,
-        depthTest: false,
+        depthTest: true,
         depthWrite: false,
       });
       this.cometParticles = new THREE.Points(particleGeo, sparks);
@@ -457,7 +484,7 @@ export class IntroEngine {
     this.scene.add(this.flare);
 
     this.cometHeadMat = flareMaterial(0.9, 0.22);
-    this.cometHeadMat.depthTest = false;
+    this.cometHeadMat.depthTest = true;
     this.cometHead = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.cometHeadMat);
     this.cometHead.renderOrder = 20;
     this.cometHead.frustumCulled = false;
@@ -649,8 +676,8 @@ export class IntroEngine {
   }
 
   private updateComet(t: number) {
-    // The comet is a continuous foreground motif for the whole film, then its final
-    // trajectory converges onto the blast point immediately before the fireworks.
+    // The comet is a world-space object: the camera can pass it, terrain can occlude it,
+    // and the arc always terminates at the actual 3D blast position.
     const active = t >= 0 && t < TL.explode;
     for (const trail of this.cometTrails) trail.visible = active;
     this.cometParticles.visible = active;
@@ -658,40 +685,38 @@ export class IntroEngine {
     if (!active) return;
 
     const progress = clamp(t / TL.explode);
-    const target = BLAST_POS.clone().project(this.camera);
-    const converge = smoothstep(TL.explode - 4.2, TL.explode, t);
-    const sx = -0.95;
-    const sy = 0.18 + 0.08 * Math.sin(t * 0.24);
-    const ex = THREE.MathUtils.lerp(0.76, target.x, converge);
-    const ey = THREE.MathUtils.lerp(-0.08, target.y, converge);
-    const ez = THREE.MathUtils.lerp(0, target.z, converge);
-    const cx = (sx + ex) * 0.5;
-    const cy = (sy + ey) * 0.5 + 0.28 + 0.08 * Math.sin(t * 0.3);
+    this.camera.getWorldDirection(this.cometForward).normalize();
+    this.cometRight.crossVectors(this.cometForward, this.camera.up).normalize();
+    this.cometUp.copy(this.camera.up).normalize();
+    this.cometP0.copy(this.camera.position).addScaledVector(this.cometForward, 24);
+    this.cometP0.addScaledVector(this.cometRight, -2.5);
+    this.cometP1.copy(this.cometP0).addScaledVector(this.cometForward, 14);
+    this.cometP1.addScaledVector(this.cometRight, 11).addScaledVector(this.cometUp, 5);
+    this.cometP2.copy(BLAST_POS).add(new THREE.Vector3(0, 9, 15));
+
     const at = (u: number, out: THREE.Vector3, offset = 0) => {
       const v = 1 - u;
-      const arcX = v * v * sx + 2 * v * u * cx + u * u * ex;
-      const arcY = v * v * sy + 2 * v * u * cy + u * u * ey;
-      // Gentle corkscrew motion, fading to zero at both ends so the spark launches
-      // cleanly and lands precisely on the blast point.
+      out.copy(this.cometP0).multiplyScalar(v * v * v)
+        .addScaledVector(this.cometP1, 3 * v * v * u)
+        .addScaledVector(this.cometP2, 3 * v * u * u)
+        .addScaledVector(BLAST_POS, u * u * u);
       const envelope = Math.sin(Math.PI * u);
-      const x = arcX + envelope * (0.12 * Math.sin(u * Math.PI * 5 + t * 0.12) + offset);
-      const y = arcY + envelope * (0.17 * Math.sin(u * Math.PI * 3.4 + t * 0.09) + offset * 0.7);
-      const z = ez + 0.025 * Math.sin(u * 15 + t * 2);
-      return out.set(x, y, z).unproject(this.camera);
+      out.addScaledVector(this.cometRight, envelope * (0.8 * Math.sin(u * Math.PI * 5 + t * 0.12) + offset));
+      out.addScaledVector(this.cometUp, envelope * (0.6 * Math.sin(u * Math.PI * 3.4 + t * 0.09) + offset * 0.7));
+      return out;
     };
 
     const trailStart = progress - 0.52;
     for (let strandIndex = 0; strandIndex < this.cometTrails.length; strandIndex++) {
       const trail = this.cometTrails[strandIndex];
       const linePos = trail.geometry.getAttribute("position") as THREE.BufferAttribute;
-      const offset = strandIndex === 1 ? 0.013 : strandIndex === 2 ? -0.016 : 0;
+      const offset = strandIndex === 1 ? 0.11 : strandIndex === 2 ? -0.14 : 0;
       for (let i = 0; i < linePos.count; i++) {
         const u = trailStart + (progress - trailStart) * (i / (linePos.count - 1));
         const p = at(u, this.tmpV, offset);
         linePos.setXYZ(i, p.x, p.y, p.z);
       }
       linePos.needsUpdate = true;
-      this.cometTrailMats[strandIndex].opacity = [0.82, 0.43, 0.25][strandIndex];
     }
 
     const particlePos = this.cometParticles.geometry.getAttribute("position") as THREE.BufferAttribute;
@@ -701,18 +726,16 @@ export class IntroEngine {
       const spreadY = this.cometParticleSeeds[i * 3 + 2];
       const u = progress - seed * 0.52;
       const p = at(u, this.tmpV);
-      const spread = 0.002 + seed * 0.014;
-      particlePos.setXYZ(i, p.x + spreadX * spread, p.y + spreadY * spread, p.z);
+      const spread = 0.12 + seed * 0.45;
+      particlePos.setXYZ(i, p.x + spreadX * spread, p.y + spreadY * spread, p.z + (spreadX - spreadY) * spread * 0.4);
     }
     particlePos.needsUpdate = true;
 
     const head = at(progress, this.tmpV);
     this.cometHead.position.copy(head);
-    // Scale by camera distance so the spark stays a compact point instead of blooming
-    // into a screen-filling flare when its NDC depth happens to be near the camera.
-    const apparentSize = head.distanceTo(this.camera.position) * 0.035;
+    const apparentSize = head.distanceTo(this.camera.position) * 0.018;
     this.billboard(this.cometHead, apparentSize);
-    this.cometHeadMat.uniforms.uI.value = 0.22 + 0.07 * Math.sin(t * 28);
+    this.cometHeadMat.uniforms.uI.value = 0.18 + 0.06 * Math.sin(t * 28);
   }
 
   private apply(t: number, warm = false) {
