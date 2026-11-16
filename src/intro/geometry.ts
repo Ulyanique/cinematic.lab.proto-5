@@ -293,10 +293,11 @@ export function buildHero(seed: number): HeroData {
   const soup = new TriSoup(rand);
 
   const N = [5, 6, 6, 7][Math.floor(rand() * 4)];
-  const wb = 7.0 + rand() * 1.3;
+  // Wider than the original pillar, while retaining enough clearance between neighbors.
+  const wb = 10.5 + rand() * 2.0;
   const R = wb / (2 * Math.sin(Math.PI / N));
   const H = 12.5 + rand() * 3.5;
-  const taper = 0.64 + rand() * 0.22;
+  const taper = 0.78 + rand() * 0.12;
   const skew = v3((rand() - 0.5) * 3.4, 0, -(0.3 + rand() * 1.4));
 
   soup.y0 = 0;
@@ -376,6 +377,23 @@ export function buildHero(seed: number): HeroData {
   const nrm = v3().subVectors(b1, b0).cross(v3().subVectors(t0, b0)).normalize();
   const off = nrm.clone().multiplyScalar(0.06);
   const P = [b0, b1, t1, t0].map((p) => p.clone().add(off));
+  // Use a square-ish active screen area centered on the facade instead of stretching
+  // a tall full-height panel; the surrounding monolith remains visible as a frame.
+  const sideL = P[3].clone().sub(P[0]);
+  const sideR = P[2].clone().sub(P[1]);
+  const sideLLen = sideL.length();
+  const sideRLen = sideR.length();
+  const spanBottom = P[1].distanceTo(P[0]);
+  const spanTop = P[2].distanceTo(P[3]);
+  const panelH = Math.min((spanBottom + spanTop) * 0.5, sideLLen, sideRLen);
+  const insetL = (sideLLen - panelH) / (2 * sideLLen);
+  const insetR = (sideRLen - panelH) / (2 * sideRLen);
+  const bottomL = P[0].clone();
+  const bottomR = P[1].clone();
+  P[0].copy(bottomL).addScaledVector(sideL, insetL);
+  P[3].copy(bottomL).addScaledVector(sideL, 1 - insetL);
+  P[1].copy(bottomR).addScaledVector(sideR, insetR);
+  P[2].copy(bottomR).addScaledVector(sideR, 1 - insetR);
   const wbot = b1.x - b0.x;
   const wtop = t1.x - t0.x;
   const scrData = [
@@ -396,7 +414,7 @@ export function buildHero(seed: number): HeroData {
   screen.setAttribute("aScr", new THREE.Float32BufferAttribute(ss, 3));
   screen.computeBoundingSphere();
 
-  const aspect = clamp(((wbot + wtop) / 2) / Math.hypot(H, skew.z * (1 - taper)), 0.3, 0.8);
+  const aspect = clamp(((wbot + wtop) / 2) / Math.hypot(H, skew.z * (1 - taper)), 1.0, 1.25);
   return {
     body: soup.build(),
     screen,
