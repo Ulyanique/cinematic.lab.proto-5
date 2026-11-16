@@ -26,6 +26,7 @@ export interface IntroEvents {
   onProgress?: (frac: number, t: number) => void;
   onChapter?: (chapter: number) => void;
   onStage?: (stage: Stage) => void;
+  onReady?: () => void;
 }
 
 interface Hero {
@@ -86,14 +87,17 @@ export class IntroEngine {
   private logo: CompassLogo;
 
   private raf = 0;
-  private startWall = 0;
+  private clock = 0;
+  private lastTs = 0;
+  private slowAcc = 0;
+  private slowCool = 0;
   private fixedT: number | null;
   private events: IntroEvents;
   private lastStage: Stage | null = null;
   private lastChapter = -1;
   private pixelRatio: number;
-  private frameTimes: number[] = [];
   private disposed = false;
+  private debugLook = new URLSearchParams(window.location.search).get("look");
   private tmpV = new THREE.Vector3();
 
   constructor(container: HTMLElement, events: IntroEvents = {}, fixedT: number | null = null) {
@@ -164,10 +168,14 @@ export class IntroEngine {
       const data = buildHero(101 + i * 13);
       const pl = heroPlacement(i);
       let minH = Infinity;
+      let maxH = -Infinity;
       minH = Math.min(minH, terrainHeight(pl.x, pl.z));
+      maxH = Math.max(maxH, terrainHeight(pl.x, pl.z));
       for (let k = 0; k < 10; k++) {
         const a = (k / 10) * Math.PI * 2;
-        minH = Math.min(minH, terrainHeight(pl.x + Math.cos(a) * 6, pl.z + Math.sin(a) * 6));
+        const hh = terrainHeight(pl.x + Math.cos(a) * 6, pl.z + Math.sin(a) * 6);
+        minH = Math.min(minH, hh);
+        maxH = Math.max(maxH, hh);
       }
       const baseY = minH - 1.5;
 
@@ -234,7 +242,8 @@ export class IntroEngine {
         })
       );
       const glow = new THREE.Mesh(glowGeo, glowMat);
-      glow.position.y = 1.4;
+      // lift the ground glow above the highest facet around the base so it is never cut into polygons
+      glow.position.y = maxH - baseY + 0.6;
       glow.frustumCulled = false;
       group.add(glow);
 
@@ -250,9 +259,17 @@ export class IntroEngine {
         uniforms: { uDraw: { value: 0 }, uI: { value: 1 }, uTime: this.U.uTime },
       })
     );
-    const sigil = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), this.sigilMat);
+    // the sigil follows the terrain relief, so facets never slice through its lines
+    this.sigilMat.polygonOffset = true;
+    this.sigilMat.polygonOffsetFactor = -2;
+    this.sigilMat.polygonOffsetUnits = -2;
+    const sigilGeo = new THREE.PlaneGeometry(80, 80, 160, 160);
+    {
+      const sp = sigilGeo.attributes.position;
+      for (let i = 0; i < sp.count; i++) sp.setZ(i, terrainHeight(sp.getX(i), -sp.getY(i)) + 0.5);
+    }
+    const sigil = new THREE.Mesh(sigilGeo, this.sigilMat);
     sigil.rotation.x = -Math.PI / 2;
-    sigil.position.y = 0.4;
     sigil.frustumCulled = false;
     this.scene.add(sigil);
 
@@ -390,7 +407,9 @@ export class IntroEngine {
         uniforms: { uR: { value: 0 }, uW: { value: 1.5 }, uI: { value: 0 }, uTime: this.U.uTime },
       })
     );
+    this.ringMat.depthTest = false;
     this.ring = new THREE.Mesh(new THREE.PlaneGeometry(800, 800), this.ringMat);
+    this.ring.renderOrder = 5;
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.y = 0.9;
     this.ring.frustumCulled = false;
@@ -435,20 +454,40 @@ export class IntroEngine {
     this.composer.addPass(new OutputPass());
 
     window.addEventListener("resize", this.onResize);
-    this.startWall = performance.now();
-    this.loop();
+    document.addEventListener("visibilitychange", this.onVisibility);
+    this.warmUp();
+    this.lastTs = performance.now();
+    this.raf = requestAnimationFrame(this.loop);
+    this.events.onReady?.();
   }
 
-  /** current intro time in seconds */
+  /** current intro time in seconds (accumulated per frame, so hitches never make the film jump) */
   get time() {
-    return this.fixedT !== null ? this.fixedT : (performance.now() - this.startWall) / 1000;
+    return this.fixedT !== null ? this.fixedT : this.clock;
   }
 
   restart() {
-    this.startWall = performance.now();
+    this.clock = 0;
     this.lastStage = null;
     this.lastChapter = -1;
   }
+
+  /**
+   * Render every visual state once behind black so all shaders are compiled, textures and
+   * buffers are uploaded *before* the film starts – no stutter at the explosion.
+   */
+  private warmUp() {
+    for (const t of [TL.explode + 1, TL.explode - 0.5, 20, 0]) {
+      this.apply(t, true);
+      this.composer.render();
+    }
+    this.lastStage = null;
+    this.lastChapter = -1;
+  }
+
+  private onVisibility = () => {
+    this.lastTs = performance.now();
+  };
 
   private onResize = () => {
     const w = this.container.clientWidth || window.innerWidth;
@@ -469,20 +508,26 @@ export class IntroEngine {
     this.onResize();
   }
 
-  private loop = () => {
+  private loop = (ts: number) => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    const t0 = performance.now();
-    const t = this.time;
-    this.apply(t);
+    let dt = (ts - this.lastTs) / 1000;
+    this.lastTs = ts;
+    if (!(dt > 0)) dt = 1 / 60;
+    dt = Math.min(dt, 0.25);
+    if (this.fixedT === null) this.clock += dt;
+    this.apply(this.time);
     this.composer.render();
 
-    // adaptive resolution
-    this.frameTimes.push(performance.now() - t0 + 0);
-    if (this.frameTimes.length >= 90) {
-      const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
-      this.frameTimes.length = 0;
-      if (avg > 26 && this.pixelRatio > 0.8) this.setPixelRatio(Math.max(0.75, this.pixelRatio - 0.25));
+    // adaptive resolution from the real frame interval; only steps down, with a cool-down,
+    // so the picture never "breathes" in quality
+    this.slowCool = Math.max(0, this.slowCool - dt);
+    if (dt > 0.034 && this.slowCool === 0) this.slowAcc += dt;
+    else this.slowAcc = Math.max(0, this.slowAcc - dt * 2);
+    if (this.slowAcc > 2.5 && this.pixelRatio > 0.8) {
+      this.slowAcc = 0;
+      this.slowCool = 6;
+      this.setPixelRatio(Math.max(0.75, this.pixelRatio - 0.25));
     }
   };
 
@@ -491,7 +536,7 @@ export class IntroEngine {
     m.scale.set(size, size, 1);
   }
 
-  private apply(t: number) {
+  private apply(t: number, warm = false) {
     const U = this.U;
     const tl = t - TL.explode;
     const post = tl >= 0;
@@ -501,18 +546,27 @@ export class IntroEngine {
     const expl = post ? Math.exp(-tl * 2.4) : 0;
 
     // ------------------------------------------------ camera
+    // a slow, soft handheld drift only – no high-frequency shake anywhere
     sampleCamera(t, this.cam);
-    const sa = 0.03 + k3 * 0.45 + (post ? 1.5 * expl : 0);
+    if (this.debugLook === "logo") {
+      // QA helper: close-up on the logo (?look=logo)
+      this.cam.pos.set(0, 6.4, 12.5);
+      this.cam.target.set(0, 5.2, 0);
+      this.cam.fov = 30;
+      this.cam.roll = 0;
+    }
     const cam = this.camera;
     cam.position.copy(this.cam.pos);
-    cam.position.x += Math.sin(t * 0.9) * 0.1 + sa * (Math.sin(t * 31.3) + Math.sin(t * 47.9 + 1.2)) * 0.5;
-    cam.position.y += Math.sin(t * 1.3 + 2) * 0.08 + sa * (Math.sin(t * 37.1 + 0.4) + Math.sin(t * 53.3)) * 0.5;
-    cam.position.z += Math.sin(t * 0.7 + 1) * 0.1 + sa * Math.sin(t * 41.7 + 2.1) * 0.4;
+    cam.position.x += Math.sin(t * 0.9) * 0.1;
+    cam.position.y += Math.sin(t * 1.3 + 2) * 0.08;
+    cam.position.z += Math.sin(t * 0.7 + 1) * 0.1;
     cam.up.set(0, 1, 0);
     cam.lookAt(this.cam.target);
-    cam.rotateZ(this.cam.roll + sa * 0.02 * Math.sin(t * 29.0));
+    cam.rotateZ(this.cam.roll);
     cam.fov = this.cam.fov;
     cam.updateProjectionMatrix();
+    // fades that must fully decay after the blast (the raw implode factor stays at 1 forever)
+    const kFx = post ? Math.exp(-tl * 1.1) : kImp;
 
     // ------------------------------------------------ globals
     U.uTime.value = t;
@@ -549,12 +603,6 @@ export class IntroEngine {
       const beamI = eruption * 1.0 + (rise >= 1 ? 0.14 : 0) * rise + focus * 0.12;
       h.beamMat.uniforms.uI.value = beamI;
       h.glowMat.uniforms.uI.value = eruption * 0.9 + 0.22 * rise + focus * 0.15;
-      // everything trembles as the singularity grows
-      const tr = k3 * 0.22 + (post ? expl * 0.5 : 0);
-      const pl = heroPlacement(i);
-      h.group.rotation.y = pl.yaw + Math.sin(t * 61 + i * 3.1) * tr * 0.02;
-      h.group.position.x = pl.x + Math.sin(t * 53 + i) * tr;
-      h.group.position.z = pl.z + Math.cos(t * 47 + i * 2) * tr;
     }
     this.sceneryMat.uniforms.uGlow.value = 0.85 + k2 * 0.8 + (post ? 1.2 * expl : 0);
 
@@ -567,9 +615,9 @@ export class IntroEngine {
     this.dustMat.uniforms.uAlpha.value = 0.55 + 0.5 * smoothstep(0, 4, t);
 
     // ------------------------------------------------ singularity & explosion
-    const pulseK = Math.sin(t * (9 + kImp * 38));
+    const pulseK = Math.sin(t * (4 + kImp * 9));
     if (!post) {
-      const r = 0.06 + 0.55 * k2 + 0.05 * pulseK * kImp;
+      const r = 0.06 + 0.55 * k2 + 0.035 * pulseK * kImp;
       this.core.visible = kImp > 0.02;
       this.core.scale.setScalar(r);
       this.coreMat.uniforms.uI.value = 0.9 * smoothstep(0.05, 1, kImp);
@@ -609,21 +657,23 @@ export class IntroEngine {
     this.haloMat.uniforms.uTime.value = t;
 
     // ------------------------------------------------ post stack
-    this.bloom.strength = 0.42 + 0.35 * kImp + (post ? 1.8 * Math.exp(-tl * 2.2) : 0);
+    this.bloom.strength = 0.42 + 0.35 * kImp + (post ? 1.4 * Math.exp(-tl * 2.6) : 0);
     this.bloom.radius = 0.8;
     this.bloom.threshold = 1.0;
     const pu = this.post.uniforms;
     const flashPre = 0.5 * Math.pow(smoothstep(TL.explode - 0.45, TL.explode, t), 2);
-    pu.uFlash.value = post ? 6 * Math.exp(-tl * 6) + 0.25 * Math.exp(-tl * 1.5) : flashPre;
-    pu.uAber.value = 0.0004 + k2 * 0.004 + (post ? 0.016 * Math.exp(-tl * 2.2) : 0);
+    pu.uFlash.value = post ? 4.2 * Math.exp(-tl * 7) + 0.2 * Math.exp(-tl * 1.5) : flashPre;
+    pu.uAber.value = 0.0004 + kFx * kFx * 0.004 + (post ? 0.012 * Math.exp(-tl * 2.2) : 0);
     pu.uZoom.value = post ? 0.34 * Math.exp(-tl * 3.0) : 0.07 * k3;
     pu.uVig.value = 0.55;
-    pu.uGrain.value = 0.045;
-    pu.uFade.value = 1 - smoothstep(0, 1.8, t);
+    pu.uGrain.value = 0.032;
+    pu.uFade.value = warm ? 1 : 1 - smoothstep(0.6, 3.4, t);
     pu.uShockR.value = post ? tl * 0.78 : 0;
     pu.uShockAmp.value = post ? Math.exp(-tl * 1.7) : 0;
     this.tmpV.copy(BLAST_POS).project(cam);
     pu.uCenter.value.set(this.tmpV.x * 0.5 + 0.5, this.tmpV.y * 0.5 + 0.5);
+
+    if (warm) return;
 
     // ------------------------------------------------ UI events
     const stage: Stage =
@@ -653,8 +703,24 @@ export class IntroEngine {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.onResize);
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    const seen = new Set<unknown>();
+    this.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+      const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+      for (const mat of mats) {
+        if (seen.has(mat)) continue;
+        seen.add(mat);
+        const u = (mat as THREE.ShaderMaterial).uniforms;
+        if (u) for (const k of Object.keys(u)) (u[k].value as THREE.Texture | null)?.dispose?.();
+        mat.dispose();
+      }
+    });
+    this.logo.dispose();
     this.composer.dispose();
     this.renderer.dispose();
+    this.renderer.forceContextLoss();
     if (this.renderer.domElement.parentElement === this.container) {
       this.container.removeChild(this.renderer.domElement);
     }

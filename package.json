@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/cinzel": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
     "@types/delaunator": "^5.0.3",
     "@types/three": "^0.187.0",
     "clsx": "2.1.1",

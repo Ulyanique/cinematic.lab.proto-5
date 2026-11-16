@@ -230,9 +230,10 @@ void main(){
   col=mix(col,tex.rgb*1.5,tex.a);
 
   // scan lines + gentle flicker
-  float scan=0.9+0.1*sin(v*820.+uTime*6.);
+  float ph=fwidth(v)*820.;
+  float scan=mix(0.9,0.9+0.1*sin(v*820.+uTime*0.8),1.-smoothstep(0.7,1.8,ph));
   col*=scan;
-  col*=0.96+0.04*sin(uTime*37.+uSeed*20.);
+  col*=0.985+0.015*sin(uTime*2.3+uSeed*20.);
 
   // glowing gold frame
   float dE=min(min(u,1.-u)*uAspect,min(v,1.-v));
@@ -325,7 +326,7 @@ void main(){
   gl_Position=projectionMatrix*mv;
   float d=max(-mv.z,1.);
   gl_PointSize=clamp(uSize*uPx*(0.35+aData.w)*(55./d),1.,26.*uPx);
-  float edge=1.-smoothstep(0.30,0.5,length(rel.xz)/uBox.x);
+  float edge=(1.-smoothstep(0.30,0.5,length(rel.xz)/uBox.x))*(1.-smoothstep(0.30,0.5,abs(rel.y)/uBox.y));
   float tw=0.55+0.45*sin(uTime*(1.5+aData.w*4.)+aData.w*40.);
   vA=edge*tw*uAlpha*smoothstep(0.5,6.,d);
 }
@@ -381,7 +382,7 @@ void main(){
     pos.y-=0.5*uT*uT*(1.5+rnd*3.);
     a=exp(-uT*(0.55+rnd*0.8));
     heat=exp(-uT*1.3);
-    sz*=1.0+0.5*sin(uTime*3.+rnd*30.);
+    sz*=1.0+0.2*sin(uTime*2.+rnd*30.);
   }
   vec4 mv=viewMatrix*vec4(pos,1.);
   gl_Position=projectionMatrix*mv;
@@ -583,7 +584,7 @@ uniform float uTime;
 void main(){
   float f=pow(abs(dot(normalize(vN),normalize(vV))),1.6);
   float g=pow(1.-vY,2.4);
-  float flicker=0.85+0.15*sin(uTime*7.+vY*18.);
+  float flicker=0.9+0.1*sin(uTime*1.8+vY*9.);
   float v=f*g*flicker*uI;
   gl_FragColor=vec4(vec3(1.0,0.6,0.16)*v*1.4,v);
 }

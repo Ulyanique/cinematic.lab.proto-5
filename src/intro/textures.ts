@@ -2,12 +2,15 @@ import * as THREE from "three";
 
 /** Draws the "video placeholder" UI that sits on every monolith screen. */
 export function makePlaceholderTexture(index: number, total: number, aspect: number) {
+  // design in a 512-wide coordinate space, rasterise at 1.5x for crisp type up close
   const w = 512;
   const h = Math.round(w / aspect);
+  const K = 1.5;
   const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
+  c.width = Math.round(w * K);
+  c.height = Math.round(h * K);
   const g = c.getContext("2d")!;
+  g.scale(K, K);
   g.clearRect(0, 0, w, h);
 
   const gold = "rgba(255,206,110,0.95)";
@@ -83,7 +86,7 @@ export function makePlaceholderTexture(index: number, total: number, aspect: num
   g.fill();
 
   // typography
-  const font = (px: number, weight = 600) => `${weight} ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const font = (px: number, weight = 600) => `${weight} ${px}px "Inter", "Helvetica Neue", Arial, sans-serif`;
   g.fillStyle = gold;
   g.textBaseline = "alphabetic";
   g.font = font(w * 0.2, 700);
@@ -120,6 +123,7 @@ export function makePlaceholderTexture(index: number, total: number, aspect: num
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
+  tex.needsUpdate = true;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.generateMipmaps = true;
   return tex;

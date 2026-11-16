@@ -13,13 +13,12 @@ export class Score {
   active = false;
 
   /** t0: current intro time (seconds) at the moment audio is started. */
-  start(t0: number) {
+  start(t0: number, getTime?: () => number) {
     this.stop();
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
     this.ctx = ctx;
-    if (ctx.state === "suspended") void ctx.resume();
     const master = ctx.createGain();
     master.gain.value = 0;
     master.gain.linearRampToValueAtTime(0.9, ctx.currentTime + 1.2);
@@ -49,8 +48,23 @@ export class Score {
     const nd = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < nl; i++) nd[i] = Math.random() * 2 - 1;
 
-    this.active = true;
-    this.schedule(t0);
+    // schedule only once the context is really running, using the *current* intro time,
+    // so audio and picture stay in sync even if resume() takes a moment
+    const go = () => {
+      if (this.ctx !== ctx) return;
+      this.active = true;
+      this.schedule(getTime ? getTime() : t0);
+    };
+    if (ctx.state === "suspended") ctx.resume().then(go, go);
+    else go();
+  }
+
+  /** pause / continue together with the picture (tab hidden) */
+  suspend() {
+    void this.ctx?.suspend().catch(() => undefined);
+  }
+  resume() {
+    void this.ctx?.resume().catch(() => undefined);
   }
 
   stop() {

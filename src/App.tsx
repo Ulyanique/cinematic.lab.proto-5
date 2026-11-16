@@ -1,27 +1,51 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IntroEngine, Stage } from "./intro/Engine";
 import { Score } from "./intro/audio";
-import { HERO_COUNT } from "./intro/timeline";
+import { HERO_COUNT, TL } from "./intro/timeline";
+import { clamp, easeOutCubic, smoothstep } from "./intro/math";
 
 const BRAND = "CIRCINUS";
-const TAGLINE = "PRECISION  ·  IN EVERY  ARC";
+const TAGLINE = "PRECISION   ·   IN EVERY ARC";
+const CARD_TITLE = "CINEMATIC LAB";
+const CARD_SUB = "PROTO · 05";
+
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function loadFonts() {
+  if (!document.fonts) return;
+  const fonts = ['600 40px "Cinzel"', '300 14px "Inter"', '500 14px "Inter"', '700 40px "Inter"'];
+  await Promise.race([Promise.all(fonts.map((f) => document.fonts.load(f).catch(() => []))), wait(3000)]);
+}
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<IntroEngine | null>(null);
   const scoreRef = useRef<Score | null>(null);
+  const soundRef = useRef(false);
+
+  // overlays are painted straight from the engine clock (transform / opacity only)
+  const cardRef = useRef<HTMLDivElement>(null);
+  const cardLineRef = useRef<HTMLDivElement>(null);
+  const cardTitleRef = useRef<HTMLDivElement>(null);
+  const cardSubRef = useRef<HTMLDivElement>(null);
+  const shadeRef = useRef<HTMLDivElement>(null);
+  const letterRefs = useRef<(HTMLSpanElement | null)[]>([]);
+  const ruleRef = useRef<HTMLDivElement>(null);
+  const tagRef = useRef<HTMLDivElement>(null);
+
   const [stage, setStage] = useState<Stage>("approach");
   const [chapter, setChapter] = useState(0);
   const [sound, setSound] = useState(false);
-  const soundRef = useRef(false);
+
+  const getTime = useCallback(() => engineRef.current?.time ?? 0, []);
 
   const enableSound = useCallback(() => {
     if (soundRef.current) return;
     soundRef.current = true;
     setSound(true);
-    scoreRef.current?.start(engineRef.current?.time ?? 0);
-  }, []);
+    scoreRef.current?.start(getTime(), getTime);
+  }, [getTime]);
 
   const toggleSound = useCallback(() => {
     if (soundRef.current) {
@@ -33,45 +57,110 @@ export default function App() {
     }
   }, [enableSound]);
 
+  const paint = useCallback((t: number) => {
+    // ---- opening title card
+    const card = cardRef.current;
+    if (card) {
+      const gone = t > 4.8;
+      card.style.visibility = gone ? "hidden" : "visible";
+      if (!gone) {
+        const out = 1 - smoothstep(3.1, 4.5, t);
+        const line = cardLineRef.current!;
+        line.style.transform = `scaleX(${easeOutCubic((t - 0.3) / 1.9)})`;
+        line.style.opacity = String(smoothstep(0.2, 0.9, t) * out);
+        const a = smoothstep(1.0, 2.3, t) * out;
+        const title = cardTitleRef.current!;
+        title.style.opacity = String(a);
+        title.style.transform = `translate3d(0, ${(1 - easeOutCubic((t - 1.0) / 1.6)) * 10}px, 0)`;
+        const b = smoothstep(1.5, 2.8, t) * out;
+        const sub = cardSubRef.current!;
+        sub.style.opacity = String(b * 0.75);
+        sub.style.transform = `translate3d(0, ${(1 - easeOutCubic((t - 1.5) / 1.6)) * 8}px, 0)`;
+      }
+    }
+
+    // ---- brand reveal: letter by letter, then a light wave runs across the gold
+    const n = BRAND.length;
+    const sweepT = t - (TL.logoText + 2.6);
+    const sweepPos = sweepT > 0 && sweepT % 7 < 2 ? -2 + ((sweepT % 7) / 2) * (n + 4) : -99;
+    for (let i = 0; i < n; i++) {
+      const el = letterRefs.current[i];
+      if (!el) continue;
+      const s = clamp((t - (TL.logoText + i * 0.11)) / 1.25);
+      const e = easeOutCubic(s);
+      const k = Math.exp(-Math.pow((i + 0.5 - sweepPos) / 1.1, 2));
+      el.style.opacity = String(e);
+      el.style.transform = `translate3d(0, ${(1 - e) * 22}px, 0) scale(${1.05 - 0.05 * e})`;
+      el.style.filter = k > 0.01 ? `brightness(${(1 + 0.65 * k).toFixed(3)})` : "none";
+    }
+    if (shadeRef.current) shadeRef.current.style.opacity = String(smoothstep(TL.logoText - 0.4, TL.logoText + 1.8, t));
+    if (ruleRef.current) {
+      const r = easeOutCubic((t - (TL.logoText + 1.1)) / 1.5);
+      ruleRef.current.style.transform = `scaleX(${r})`;
+      ruleRef.current.style.opacity = String(smoothstep(TL.logoText + 1.1, TL.logoText + 1.8, t));
+    }
+    if (tagRef.current) {
+      const a = smoothstep(TL.tagline, TL.tagline + 1.8, t);
+      tagRef.current.style.opacity = String(a * 0.85);
+      tagRef.current.style.transform = `translate3d(0, ${(1 - a) * 10}px, 0)`;
+    }
+  }, []);
+
   useEffect(() => {
     if (!mountRef.current) return;
+    let cancelled = false;
+    let engine: IntroEngine | null = null;
+    const score = new Score();
+    scoreRef.current = score;
     const q = new URLSearchParams(window.location.search).get("t");
     const fixed = q !== null && !Number.isNaN(parseFloat(q)) ? parseFloat(q) : null;
-    scoreRef.current = new Score();
-    const engine = new IntroEngine(
-      mountRef.current,
-      {
-        onProgress: (f) => {
-          if (progressRef.current) progressRef.current.style.transform = `scaleX(${f})`;
+
+    // fonts first (no swap-flicker, crisp type on the monolith screens), then the heavy WebGL setup
+    void loadFonts().then(() => {
+      if (cancelled || !mountRef.current) return;
+      engine = new IntroEngine(
+        mountRef.current,
+        {
+          onProgress: (f, t) => {
+            if (progressRef.current) progressRef.current.style.transform = `scaleX(${f})`;
+            paint(t);
+          },
+          onChapter: setChapter,
+          onStage: setStage,
         },
-        onChapter: setChapter,
-        onStage: setStage,
-      },
-      fixed
-    );
-    engineRef.current = engine;
+        fixed
+      );
+      engineRef.current = engine;
+    });
 
     // browsers only allow audio after a gesture: start the score on the first interaction
     const onGesture = () => enableSound();
     window.addEventListener("pointerdown", onGesture, { once: true });
     window.addEventListener("keydown", onGesture, { once: true });
+    // keep sound and picture in lock-step when the tab is hidden
+    const onVis = () => {
+      if (!soundRef.current) return;
+      if (document.hidden) score.suspend();
+      else score.resume();
+    };
+    document.addEventListener("visibilitychange", onVis);
 
     return () => {
+      cancelled = true;
       window.removeEventListener("pointerdown", onGesture);
       window.removeEventListener("keydown", onGesture);
-      scoreRef.current?.stop();
-      engine.dispose();
+      document.removeEventListener("visibilitychange", onVis);
+      score.stop();
+      engine?.dispose();
       engineRef.current = null;
     };
-  }, [enableSound]);
+  }, [enableSound, paint]);
 
   const replay = () => {
     engineRef.current?.restart();
     setChapter(0);
-    if (soundRef.current) scoreRef.current?.start(0);
+    if (soundRef.current) scoreRef.current?.start(0, getTime);
   };
-
-  const showTitle = stage === "title" || stage === "end";
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-black select-none" style={{ cursor: "default" }}>
@@ -81,10 +170,24 @@ export default function App() {
       <div className="bar bar-top" />
       <div className="bar bar-bottom" />
 
+      {/* opening title card */}
+      <div ref={cardRef} className="card">
+        <div ref={cardTitleRef} className="card-title">
+          {CARD_TITLE}
+        </div>
+        <div ref={cardLineRef} className="card-line" />
+        <div ref={cardSubRef} className="card-sub">
+          {CARD_SUB}
+        </div>
+      </div>
+
       {/* chapter HUD */}
-      <div className="absolute left-[4vw] z-10 font-mono text-[11px] tracking-[0.35em] text-amber-200/80" style={{ bottom: "calc(var(--bar) + 22px)" }}>
+      <div
+        className="absolute left-[4vw] z-10 font-mono text-[11px] tracking-[0.35em] text-amber-200/80"
+        style={{ bottom: "calc(var(--bar) + 22px)" }}
+      >
         <div
-          className="transition-all duration-500"
+          className="transition-[opacity,transform] duration-500"
           style={{ opacity: chapter > 0 ? 1 : 0, transform: chapter > 0 ? "translateY(0)" : "translateY(6px)" }}
         >
           <span className="text-amber-300">{String(Math.max(chapter, 1)).padStart(2, "0")}</span>
@@ -95,6 +198,7 @@ export default function App() {
 
       {/* sound toggle */}
       <button
+        onPointerDown={(e) => e.stopPropagation()} // the global first-gesture hook must not fight the toggle
         onClick={toggleSound}
         className="absolute right-[4vw] z-20 flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/30 px-4 py-2 font-mono text-[10px] tracking-[0.3em] text-amber-200/90 backdrop-blur-sm transition hover:border-amber-300/80 hover:bg-amber-300/10"
         style={{ bottom: "calc(var(--bar) + 18px)" }}
@@ -103,9 +207,10 @@ export default function App() {
           {[0, 1, 2, 3].map((i) => (
             <span
               key={i}
-              className="w-[2px] bg-amber-300"
+              className="w-[2px] origin-bottom bg-amber-300"
               style={{
-                height: sound ? undefined : 3,
+                height: 12,
+                transform: sound ? undefined : "scaleY(0.25)",
                 animation: sound ? `eq ${0.7 + i * 0.17}s ease-in-out ${i * 0.1}s infinite alternate` : undefined,
               }}
             />
@@ -114,13 +219,28 @@ export default function App() {
         {sound ? "SOUND ON" : "SOUND OFF"}
       </button>
 
-      {/* brand title under the compass */}
-      {showTitle && (
-        <div className="brand-wrap" key="brand">
-          <div className="brand">{BRAND}</div>
-          <div className="tagline">{TAGLINE}</div>
+      {/* brand title under the compass – always mounted, painted from the film clock */}
+      <div className="brand-wrap">
+        <div ref={shadeRef} className="brand-shade" />
+        <div className="brand" aria-label={BRAND}>
+          {BRAND.split("").map((ch, i) => (
+            <span
+              key={i}
+              ref={(el) => {
+                letterRefs.current[i] = el;
+              }}
+              className="glyph"
+              aria-hidden="true"
+            >
+              {ch}
+            </span>
+          ))}
         </div>
-      )}
+        <div ref={ruleRef} className="brand-rule" />
+        <div ref={tagRef} className="tagline">
+          {TAGLINE}
+        </div>
+      </div>
 
       {/* replay */}
       {stage === "end" && (
@@ -131,7 +251,11 @@ export default function App() {
 
       {/* progress */}
       <div className="absolute inset-x-0 bottom-0 z-20 h-[2px] bg-amber-200/10">
-        <div ref={progressRef} className="h-full origin-left bg-gradient-to-r from-amber-700 via-amber-300 to-amber-100" style={{ transform: "scaleX(0)" }} />
+        <div
+          ref={progressRef}
+          className="h-full origin-left bg-gradient-to-r from-amber-700 via-amber-300 to-amber-100"
+          style={{ transform: "scaleX(0)" }}
+        />
       </div>
     </div>
   );

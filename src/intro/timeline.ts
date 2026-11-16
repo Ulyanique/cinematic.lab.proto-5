@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { clamp, easeOutCubic, lerp, mulberry32, terrainHeight } from "./math";
+import { clamp, lerp, mulberry32, terrainHeight } from "./math";
 
 /** Master timeline of the intro (seconds). */
 export const TL = {
@@ -88,16 +88,62 @@ function buildKeys(): Key[] {
   return keys;
 }
 
-const KEYS = buildKeys();
 
-function cr(p0: number, p1: number, p2: number, p3: number, s: number) {
-  const s2 = s * s;
-  const s3 = s2 * s;
-  return 0.5 * (2 * p1 + (-p0 + p2) * s + (2 * p0 - 5 * p1 + 4 * p2 - p3) * s2 + (-p0 + 3 * p1 - 3 * p2 + p3) * s3);
+const KEYS = buildKeys();
+const NK = KEYS.length;
+
+/**
+ * Time-aware cubic Hermite spline (non-uniform Catmull-Rom). Unlike a uniform
+ * Catmull-Rom it keeps velocity continuous even though the keys are not evenly spaced
+ * in time, so the fly-through never "snaps" at a key. The last key is a soft hover (zero velocity).
+ */
+const TENSION = 0.92;
+interface Tan {
+  p: THREE.Vector3;
+  l: THREE.Vector3;
+  fov: number;
+  roll: number;
 }
-function crV(out: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, s: number) {
-  out.set(cr(a.x, b.x, c.x, d.x, s), cr(a.y, b.y, c.y, d.y, s), cr(a.z, b.z, c.z, d.z, s));
+const TANS: Tan[] = KEYS.map((_k, j) => {
+  if (j === NK - 1) return { p: V(0, 0, 0), l: V(0, 0, 0), fov: 0, roll: 0 };
+  const a = KEYS[Math.max(0, j - 1)];
+  const b = KEYS[j + 1];
+  const dt = b.t - a.t;
+  return {
+    p: b.p.clone().sub(a.p).multiplyScalar(TENSION / dt),
+    l: b.l.clone().sub(a.l).multiplyScalar(TENSION / dt),
+    fov: ((b.fov - a.fov) * TENSION) / dt,
+    roll: ((b.roll - a.roll) * TENSION) / dt,
+  };
+});
+
+function herm(p0: number, m0: number, p1: number, m1: number, u: number, dt: number) {
+  const u2 = u * u;
+  const u3 = u2 * u;
+  return (2 * u3 - 3 * u2 + 1) * p0 + (u3 - 2 * u2 + u) * dt * m0 + (-2 * u3 + 3 * u2) * p1 + (u3 - u2) * dt * m1;
 }
+function hermV(out: THREE.Vector3, a: THREE.Vector3, ma: THREE.Vector3, b: THREE.Vector3, mb: THREE.Vector3, u: number, dt: number) {
+  out.set(herm(a.x, ma.x, b.x, mb.x, u, dt), herm(a.y, ma.y, b.y, mb.y, u, dt), herm(a.z, ma.z, b.z, mb.z, u, dt));
+}
+
+/** terrain height blurred over a neighbourhood: the raw field has sharp crests that would kink the camera */
+function softGround(x: number, z: number) {
+  let sum = terrainHeight(x, z);
+  let n = 1;
+  for (const R of [9, 21]) {
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + R;
+      sum += terrainHeight(x + Math.cos(a) * R, z + Math.sin(a) * R);
+      n++;
+    }
+  }
+  return sum / n;
+}
+
+const sstep = (x: number) => {
+  const t = clamp(x);
+  return t * t * (3 - 2 * t);
+};
 
 export interface CamState {
   pos: THREE.Vector3;
@@ -116,35 +162,88 @@ export const BLAST_POS = V(0, 5.6, 0);
 export const LOGO_POS = V(0, 5.8, 0);
 
 export function sampleCamera(t: number, out: CamState) {
+  sampleRaw(t, out);
+  if (t < TL.explode) out.pos.y += liftAt(t);
+  return out;
+}
+
+function sampleRaw(t: number, out: CamState) {
   const tl = t - TL.explode;
   if (tl >= 0) {
-    const last = KEYS[KEYS.length - 1];
-    const e = easeOutCubic(tl / 5.2);
-    const ef = easeOutCubic(tl / 6.0);
+    const last = KEYS[NK - 1];
+    // starts from the hover (zero velocity) and eases into the final frame: no reversal jerk
+    // ease-out-cubic whose first 0.3 s is blended in from rest: zero start velocity (no jerk),
+    // yet the camera clears the fireball while the white flash still covers the frame
+    const eo = (x: number) => 1 - Math.pow(1 - clamp(x), 3);
+    const blend = (x: number) => sstep(x / 0.06) * eo(x);
+    const e = blend(tl / 5.2);
+    const ef = blend(tl / 6.0);
     out.pos.lerpVectors(last.p, FINAL.pos, e);
     out.target.lerpVectors(last.l, FINAL.target, e);
-    out.fov = lerp(last.fov, FINAL.fov, ef);
+    out.fov = lerp(last.fov, FINAL.fov, ef) + 9 * (1 - Math.exp(-tl * 16)) * Math.exp(-tl * 2.4);
     out.roll = 0;
-    // slow cinematic push-in with a hint of sway while the logo shines
-    const drift = clamp((tl - 3) / 10);
-    out.pos.z -= drift * 1.6;
-    out.pos.x += Math.sin(tl * 0.35) * 0.5 * clamp(tl / 4);
-    out.pos.y += Math.sin(tl * 0.27) * 0.18 * clamp(tl / 4);
+    // slow cinematic push-in with a hint of sway while the logo shines (all C1-continuous)
+    out.pos.z -= sstep((tl - 2) / 14) * 1.6;
+    out.pos.x += Math.sin(tl * 0.35) * 0.5 * sstep(tl / 5);
+    out.pos.y += Math.sin(tl * 0.27) * 0.18 * sstep(tl / 5);
     return out;
   }
   let i = 0;
-  while (i < KEYS.length - 2 && t >= KEYS[i + 1].t) i++;
+  while (i < NK - 2 && t >= KEYS[i + 1].t) i++;
   const k1 = KEYS[i];
   const k2 = KEYS[i + 1];
-  const k0 = KEYS[Math.max(0, i - 1)];
-  const k3 = KEYS[Math.min(KEYS.length - 1, i + 2)];
-  const s = clamp((t - k1.t) / (k2.t - k1.t));
-  crV(out.pos, k0.p, k1.p, k2.p, k3.p, s);
-  crV(out.target, k0.l, k1.l, k2.l, k3.l, s);
-  out.fov = cr(k0.fov, k1.fov, k2.fov, k3.fov, s);
-  out.roll = cr(k0.roll, k1.roll, k2.roll, k3.roll, s);
-  // never dive into the dunes
-  const minY = terrainHeight(out.pos.x, out.pos.z) + 2.4;
-  if (out.pos.y < minY) out.pos.y = minY;
+  const dt = k2.t - k1.t;
+  const u = clamp((t - k1.t) / dt);
+  hermV(out.pos, k1.p, TANS[i].p, k2.p, TANS[i + 1].p, u, dt);
+  hermV(out.target, k1.l, TANS[i].l, k2.l, TANS[i + 1].l, u, dt);
+  out.fov = herm(k1.fov, TANS[i].fov, k2.fov, TANS[i + 1].fov, u, dt);
+  out.roll = herm(k1.roll, TANS[i].roll, k2.roll, TANS[i + 1].roll, u, dt) * 0.6;
   return out;
+}
+
+/**
+ * "Never dive into the dunes": the lift needed to clear the ground is computed once along the
+ * whole path, widened in time and gaussian-blurred – so the camera rises over hills with a long,
+ * gentle swell instead of tracing every crest (which would feel like bumps).
+ */
+const LIFT_HZ = 30;
+const LIFT: Float32Array = (() => {
+  const n = Math.ceil(TL.explode * LIFT_HZ) + 2;
+  const tmp: CamState = { pos: V(0, 0, 0), target: V(0, 0, 0), fov: 50, roll: 0 };
+  const need = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    sampleRaw(Math.min(i / LIFT_HZ, TL.explode - 1e-4), tmp);
+    need[i] = Math.max(0, softGround(tmp.pos.x, tmp.pos.z) + 2.9 - tmp.pos.y);
+  }
+  const W = Math.round(0.7 * LIFT_HZ);
+  const dil = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let m = 0;
+    for (let j = Math.max(0, i - W); j <= Math.min(n - 1, i + W); j++) m = Math.max(m, need[j]);
+    dil[i] = m;
+  }
+  const sigma = 0.45 * LIFT_HZ;
+  const R = Math.ceil(sigma * 3);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    let wsum = 0;
+    for (let j = -R; j <= R; j++) {
+      const k = Math.min(n - 1, Math.max(0, i + j));
+      const w = Math.exp(-(j * j) / (2 * sigma * sigma));
+      sum += dil[k] * w;
+      wsum += w;
+    }
+    out[i] = sum / wsum;
+  }
+  return out;
+})();
+
+function liftAt(t: number) {
+  const f = clamp(t, 0, TL.explode) * LIFT_HZ;
+  const i = Math.floor(f);
+  const u = f - i;
+  const a = LIFT[Math.min(i, LIFT.length - 1)];
+  const b = LIFT[Math.min(i + 1, LIFT.length - 1)];
+  return a + (b - a) * u;
 }
