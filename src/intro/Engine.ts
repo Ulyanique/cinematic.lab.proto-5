@@ -89,14 +89,13 @@ export class IntroEngine {
   private raf = 0;
   private clock = 0;
   private lastTs = 0;
-  private slowAcc = 0;
-  private slowCool = 0;
   private fixedT: number | null;
   private events: IntroEvents;
   private lastStage: Stage | null = null;
   private lastChapter = -1;
   private pixelRatio: number;
   private disposed = false;
+  private paused = false;
   private debugLook = new URLSearchParams(window.location.search).get("look");
   private tmpV = new THREE.Vector3();
 
@@ -108,7 +107,9 @@ export class IntroEngine {
     const h = container.clientHeight || window.innerHeight;
 
     const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+    // Keep the post-processing framebuffer modest: the scene uses several full-resolution
+    // render targets, and high-DPI displays can otherwise multiply GPU memory/bandwidth cost.
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 1);
     renderer.setPixelRatio(this.pixelRatio);
     renderer.setSize(w, h);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -424,7 +425,9 @@ export class IntroEngine {
     // ---------------------------------------------------------------- post
     const rt = new THREE.WebGLRenderTarget(w * this.pixelRatio, h * this.pixelRatio, {
       type: THREE.HalfFloatType,
-      samples: 4,
+      // MSAA on half-float composer targets is inconsistently supported and can produce
+      // incomplete framebuffers (black output) on some integrated/mobile GPUs.
+      samples: 0,
     });
     this.composer = new EffectComposer(renderer, rt);
     this.composer.setPixelRatio(this.pixelRatio);
@@ -454,6 +457,8 @@ export class IntroEngine {
     this.composer.addPass(new OutputPass());
 
     window.addEventListener("resize", this.onResize);
+    this.renderer.domElement.addEventListener("webglcontextlost", this.onContextLost);
+    this.renderer.domElement.addEventListener("webglcontextrestored", this.onContextRestored);
     document.addEventListener("visibilitychange", this.onVisibility);
     this.warmUp();
     this.lastTs = performance.now();
@@ -467,9 +472,40 @@ export class IntroEngine {
   }
 
   restart() {
+    this.fixedT = null;
     this.clock = 0;
+    this.paused = false;
     this.lastStage = null;
     this.lastChapter = -1;
+    this.lastTs = performance.now();
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = requestAnimationFrame(this.loop);
+  }
+
+  get isPaused() {
+    return this.paused;
+  }
+
+  pause() {
+    if (this.paused) return;
+    this.paused = true;
+    cancelAnimationFrame(this.raf);
+  }
+
+  resume() {
+    if (!this.paused || this.disposed) return;
+    this.paused = false;
+    this.lastTs = performance.now();
+    this.raf = requestAnimationFrame(this.loop);
+  }
+
+  /** Seek the film timeline in seconds and resume playback from the selected point. */
+  seek(seconds: number) {
+    this.clock = clamp(seconds, 0, TL.end);
+    this.fixedT = null;
+    this.lastStage = null;
+    this.lastChapter = -1;
+    this.apply(this.clock);
   }
 
   /**
@@ -486,7 +522,29 @@ export class IntroEngine {
   }
 
   private onVisibility = () => {
+    // Do not keep rendering into a throttled/hidden tab. Reset the frame timestamp on
+    // resume so the film clock does not jump forward after backgrounding.
+    if (document.hidden) {
+      cancelAnimationFrame(this.raf);
+      return;
+    }
     this.lastTs = performance.now();
+    if (!this.disposed && !this.paused) this.raf = requestAnimationFrame(this.loop);
+  };
+
+  private onContextLost = (event: Event) => {
+    // Prevent the browser from discarding the context permanently. Three.js can restore
+    // its resources when the browser emits webglcontextrestored.
+    event.preventDefault();
+    cancelAnimationFrame(this.raf);
+    console.error("WebGL context lost; waiting for the browser to restore it.");
+  };
+
+  private onContextRestored = () => {
+    if (this.disposed) return;
+    console.info("WebGL context restored; resuming cinematic render loop.");
+    this.lastTs = performance.now();
+    if (!this.paused && !document.hidden) this.raf = requestAnimationFrame(this.loop);
   };
 
   private onResize = () => {
@@ -500,14 +558,6 @@ export class IntroEngine {
     this.post.uniforms.uAspect.value = w / h;
   };
 
-  private setPixelRatio(pr: number) {
-    this.pixelRatio = pr;
-    this.renderer.setPixelRatio(pr);
-    (this.dustMat.uniforms.uPx as { value: number }).value = pr;
-    (this.blastMat.uniforms.uPx as { value: number }).value = pr;
-    this.onResize();
-  }
-
   private loop = (ts: number) => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
@@ -519,16 +569,8 @@ export class IntroEngine {
     this.apply(this.time);
     this.composer.render();
 
-    // adaptive resolution from the real frame interval; only steps down, with a cool-down,
-    // so the picture never "breathes" in quality
-    this.slowCool = Math.max(0, this.slowCool - dt);
-    if (dt > 0.034 && this.slowCool === 0) this.slowAcc += dt;
-    else this.slowAcc = Math.max(0, this.slowAcc - dt * 2);
-    if (this.slowAcc > 2.5 && this.pixelRatio > 0.8) {
-      this.slowAcc = 0;
-      this.slowCool = 6;
-      this.setPixelRatio(Math.max(0.75, this.pixelRatio - 0.25));
-    }
+    // Keep the composer framebuffer at a stable 1x resolution. Resizing multiple
+    // post-processing targets dynamically during playback can flash an empty frame.
   };
 
   private billboard(m: THREE.Mesh, size: number) {
@@ -703,6 +745,8 @@ export class IntroEngine {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.onResize);
+    this.renderer.domElement.removeEventListener("webglcontextlost", this.onContextLost);
+    this.renderer.domElement.removeEventListener("webglcontextrestored", this.onContextRestored);
     document.removeEventListener("visibilitychange", this.onVisibility);
     const seen = new Set<unknown>();
     this.scene.traverse((o) => {

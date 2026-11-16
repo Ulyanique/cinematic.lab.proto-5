@@ -10,6 +10,12 @@ const CARD_TITLE = "CINEMATIC LAB";
 const CARD_SUB = "PROTO · 05";
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const formatTime = (seconds: number) => {
+  const safe = Math.max(0, seconds);
+  const minutes = Math.floor(safe / 60);
+  const remainder = (safe % 60).toFixed(1).padStart(4, "0");
+  return `${String(minutes).padStart(2, "0")}:${remainder}`;
+};
 
 async function loadFonts() {
   if (!document.fonts) return;
@@ -19,7 +25,9 @@ async function loadFonts() {
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
-  const progressRef = useRef<HTMLDivElement>(null);
+  const progressRef = useRef<HTMLInputElement>(null);
+  const timeRef = useRef<HTMLSpanElement>(null);
+  const seekingRef = useRef(false);
   const engineRef = useRef<IntroEngine | null>(null);
   const scoreRef = useRef<Score | null>(null);
   const soundRef = useRef(false);
@@ -37,6 +45,7 @@ export default function App() {
   const [stage, setStage] = useState<Stage>("approach");
   const [chapter, setChapter] = useState(0);
   const [sound, setSound] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   const getTime = useCallback(() => engineRef.current?.time ?? 0, []);
 
@@ -121,8 +130,9 @@ export default function App() {
       engine = new IntroEngine(
         mountRef.current,
         {
-          onProgress: (f, t) => {
-            if (progressRef.current) progressRef.current.style.transform = `scaleX(${f})`;
+          onProgress: (_f, t) => {
+            if (progressRef.current && !seekingRef.current) progressRef.current.value = String(t);
+            if (timeRef.current) timeRef.current.textContent = `${formatTime(t)} / ${formatTime(TL.end)}`;
             paint(t);
           },
           onChapter: setChapter,
@@ -156,19 +166,29 @@ export default function App() {
     };
   }, [enableSound, paint]);
 
+  const togglePlayback = () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (engine.isPaused) {
+      engine.resume();
+      setPaused(false);
+    } else {
+      engine.pause();
+      setPaused(true);
+    }
+  };
+
   const replay = () => {
     engineRef.current?.restart();
+    setPaused(false);
     setChapter(0);
     if (soundRef.current) scoreRef.current?.start(0, getTime);
   };
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-black select-none" style={{ cursor: "default" }}>
+    <div className="app-shell fixed inset-0 grid place-items-center overflow-hidden bg-black select-none" style={{ cursor: "default" }}>
+      <div className="cinema-frame">
       <div ref={mountRef} className="absolute inset-0" />
-
-      {/* cinematic letterbox */}
-      <div className="bar bar-top" />
-      <div className="bar bar-bottom" />
 
       {/* opening title card */}
       <div ref={cardRef} className="card">
@@ -184,7 +204,7 @@ export default function App() {
       {/* chapter HUD */}
       <div
         className="absolute left-[4vw] z-10 font-mono text-[11px] tracking-[0.35em] text-amber-200/80"
-        style={{ bottom: "calc(var(--bar) + 22px)" }}
+        style={{ bottom: "22px" }}
       >
         <div
           className="transition-[opacity,transform] duration-500"
@@ -201,7 +221,7 @@ export default function App() {
         onPointerDown={(e) => e.stopPropagation()} // the global first-gesture hook must not fight the toggle
         onClick={toggleSound}
         className="absolute right-[4vw] z-20 flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/30 px-4 py-2 font-mono text-[10px] tracking-[0.3em] text-amber-200/90 backdrop-blur-sm transition hover:border-amber-300/80 hover:bg-amber-300/10"
-        style={{ bottom: "calc(var(--bar) + 18px)" }}
+        style={{ bottom: "18px" }}
       >
         <span className="flex h-3 items-end gap-[2px]">
           {[0, 1, 2, 3].map((i) => (
@@ -249,13 +269,39 @@ export default function App() {
         </button>
       )}
 
-      {/* progress */}
-      <div className="absolute inset-x-0 bottom-0 z-20 h-[2px] bg-amber-200/10">
-        <div
+      {/* seekable film timeline with an explicit seconds readout */}
+      <div className="absolute inset-x-[4vw] bottom-[54px] z-20 flex items-center gap-4">
+        <button
+          type="button"
+          onClick={togglePlayback}
+          aria-label={paused ? "Продолжить воспроизведение" : "Поставить на паузу"}
+          className="min-w-[94px] rounded-full border border-amber-300/35 bg-black/40 px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] text-amber-200/90 hover:border-amber-300/80"
+        >
+          {paused ? "ПРОДОЛЖИТЬ" : "ПАУЗА"}
+        </button>
+        <span ref={timeRef} className="min-w-[92px] font-mono text-[10px] tracking-[0.18em] text-amber-200/80">
+          00:00.0 / 00:43.5
+        </span>
+        <input
           ref={progressRef}
-          className="h-full origin-left bg-gradient-to-r from-amber-700 via-amber-300 to-amber-100"
-          style={{ transform: "scaleX(0)" }}
+          aria-label="Перемотка по таймлайну, секунды"
+          type="range"
+          min={0}
+          max={TL.end}
+          step={0.1}
+          defaultValue={0}
+          onPointerDown={() => { seekingRef.current = true; }}
+          onPointerUp={() => { seekingRef.current = false; }}
+          onPointerCancel={() => { seekingRef.current = false; }}
+          onBlur={() => { seekingRef.current = false; }}
+          onInput={(event) => {
+            const seconds = Number(event.currentTarget.value);
+            if (timeRef.current) timeRef.current.textContent = `${formatTime(seconds)} / ${formatTime(TL.end)}`;
+            engineRef.current?.seek(seconds);
+          }}
+          className="h-5 min-w-0 flex-1 cursor-pointer accent-amber-300"
         />
+      </div>
       </div>
     </div>
   );

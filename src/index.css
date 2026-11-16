@@ -4,10 +4,6 @@
 @import "@fontsource/inter/latin-500.css";
 @import "@fontsource/inter/latin-700.css";
 
-:root {
-  --bar: max(0px, calc((100vh - 100vw / 2.39) / 2));
-}
-
 html,
 body,
 #root {
@@ -15,6 +11,20 @@ body,
   margin: 0;
   background: #000;
   overflow: hidden;
+}
+
+.app-shell {
+  --frame-width: min(100vw, 177.7778vh);
+  --frame-height: min(100vh, 56.25vw);
+}
+
+.cinema-frame {
+  position: relative;
+  width: var(--frame-width);
+  height: var(--frame-height);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  isolation: isolate;
 }
 
 body {
@@ -26,35 +36,6 @@ body {
 canvas {
   /* the canvas never repaints through the compositor's text path */
   touch-action: none;
-}
-
-.bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: var(--bar);
-  background: #000;
-  z-index: 15;
-  pointer-events: none;
-  will-change: transform;
-}
-.bar-top {
-  top: 0;
-  animation: barIn 3s cubic-bezier(0.22, 0.7, 0.1, 1) 0.2s both;
-  transform-origin: top;
-}
-.bar-bottom {
-  bottom: 0;
-  animation: barIn 3s cubic-bezier(0.22, 0.7, 0.1, 1) 0.2s both;
-  transform-origin: bottom;
-}
-@keyframes barIn {
-  from {
-    transform: scaleY(0);
-  }
-  to {
-    transform: scaleY(1);
-  }
 }
 
 /* ------------------------------------------------------------ opening title card */

@@ -293,10 +293,11 @@ export function buildHero(seed: number): HeroData {
   const soup = new TriSoup(rand);
 
   const N = [5, 6, 6, 7][Math.floor(rand() * 4)];
-  const wb = 7.0 + rand() * 1.3;
+  // Broad video faces: near-square panels can host square source footage without cropping.
+  const wb = 18.0 + rand() * 2.0;
   const R = wb / (2 * Math.sin(Math.PI / N));
   const H = 12.5 + rand() * 3.5;
-  const taper = 0.64 + rand() * 0.22;
+  const taper = 0.82 + rand() * 0.10;
   const skew = v3((rand() - 0.5) * 3.4, 0, -(0.3 + rand() * 1.4));
 
   soup.y0 = 0;
@@ -396,7 +397,7 @@ export function buildHero(seed: number): HeroData {
   screen.setAttribute("aScr", new THREE.Float32BufferAttribute(ss, 3));
   screen.computeBoundingSphere();
 
-  const aspect = clamp(((wbot + wtop) / 2) / Math.hypot(H, skew.z * (1 - taper)), 0.3, 0.8);
+  const aspect = clamp(((wbot + wtop) / 2) / Math.hypot(H, skew.z * (1 - taper)), 1.0, 1.25);
   return {
     body: soup.build(),
     screen,

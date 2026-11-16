@@ -10,6 +10,8 @@ const __dirname = path.dirname(__filename);
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Arena previews use a proxied host that differs from localhost.
+  server: { host: "0.0.0.0", allowedHosts: true },
   plugins: [react(), tailwindcss(), viteSingleFile()],
   resolve: {
     alias: {
