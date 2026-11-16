@@ -84,8 +84,8 @@ export class IntroEngine {
   private ring: THREE.Mesh;
   private ringMat: THREE.ShaderMaterial;
   private blastMat: THREE.ShaderMaterial;
-  private cometTrail: THREE.Line;
-  private cometTrailMat: THREE.LineBasicMaterial;
+  private cometTrails: THREE.Line[] = [];
+  private cometTrailMats: THREE.LineBasicMaterial[] = [];
   private cometParticles: THREE.Points;
   private cometParticleSeeds: Float32Array;
   private cometHead: THREE.Mesh;
@@ -350,23 +350,32 @@ export class IntroEngine {
 
     // Camera-facing comet streak: a smooth luminous arc plus individually drifting sparks.
     {
-      const trailCount = 48;
-      const trailGeo = new THREE.BufferGeometry();
-      trailGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(trailCount * 3), 3));
-      trailGeo.setDrawRange(0, trailCount);
-      this.cometTrailMat = new THREE.LineBasicMaterial({
-        color: 0xffd77a,
-        transparent: true,
-        opacity: 0.85,
-        blending: THREE.AdditiveBlending,
-        depthTest: false,
-        depthWrite: false,
-      });
-      this.cometTrail = new THREE.Line(trailGeo, this.cometTrailMat);
-      this.cometTrail.renderOrder = 18;
-      this.cometTrail.frustumCulled = false;
-      this.cometTrail.visible = false;
-      this.scene.add(this.cometTrail);
+      const trailCount = 64;
+      const strands = [
+        { color: 0xffe6a0, opacity: 0.82, offset: 0 },
+        { color: 0xffc44f, opacity: 0.43, offset: 0.013 },
+        { color: 0xff9f32, opacity: 0.25, offset: -0.016 },
+      ];
+      for (const [index, strand] of strands.entries()) {
+        const trailGeo = new THREE.BufferGeometry();
+        trailGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(trailCount * 3), 3));
+        trailGeo.setDrawRange(0, trailCount);
+        const material = new THREE.LineBasicMaterial({
+          color: strand.color,
+          transparent: true,
+          opacity: strand.opacity,
+          blending: THREE.AdditiveBlending,
+          depthTest: false,
+          depthWrite: false,
+        });
+        const trail = new THREE.Line(trailGeo, material);
+        trail.renderOrder = 18 + index;
+        trail.frustumCulled = false;
+        trail.visible = false;
+        this.cometTrails.push(trail);
+        this.cometTrailMats.push(material);
+        this.scene.add(trail);
+      }
 
       const particleCount = 220;
       const particleGeo = new THREE.BufferGeometry();
@@ -643,7 +652,7 @@ export class IntroEngine {
     // The comet is a continuous foreground motif for the whole film, then its final
     // trajectory converges onto the blast point immediately before the fireworks.
     const active = t >= 0 && t < TL.explode;
-    this.cometTrail.visible = active;
+    for (const trail of this.cometTrails) trail.visible = active;
     this.cometParticles.visible = active;
     this.cometHead.visible = active;
     if (!active) return;
@@ -658,30 +667,39 @@ export class IntroEngine {
     const ez = THREE.MathUtils.lerp(0, target.z, converge);
     const cx = (sx + ex) * 0.5;
     const cy = (sy + ey) * 0.5 + 0.28 + 0.08 * Math.sin(t * 0.3);
-    const at = (u: number, out: THREE.Vector3) => {
+    const at = (u: number, out: THREE.Vector3, offset = 0) => {
       const v = 1 - u;
-      const x = v * v * sx + 2 * v * u * cx + u * u * ex;
-      const y = v * v * sy + 2 * v * u * cy + u * u * ey;
+      const arcX = v * v * sx + 2 * v * u * cx + u * u * ex;
+      const arcY = v * v * sy + 2 * v * u * cy + u * u * ey;
+      // Gentle corkscrew motion, fading to zero at both ends so the spark launches
+      // cleanly and lands precisely on the blast point.
+      const envelope = Math.sin(Math.PI * u);
+      const x = arcX + envelope * (0.12 * Math.sin(u * Math.PI * 5 + t * 0.12) + offset);
+      const y = arcY + envelope * (0.17 * Math.sin(u * Math.PI * 3.4 + t * 0.09) + offset * 0.7);
       const z = ez + 0.025 * Math.sin(u * 15 + t * 2);
       return out.set(x, y, z).unproject(this.camera);
     };
 
-    const linePos = this.cometTrail.geometry.getAttribute("position") as THREE.BufferAttribute;
-    const trailStart = progress - 0.34;
-    for (let i = 0; i < linePos.count; i++) {
-      const u = trailStart + (progress - trailStart) * (i / (linePos.count - 1));
-      const p = at(u, this.tmpV);
-      linePos.setXYZ(i, p.x, p.y, p.z);
+    const trailStart = progress - 0.52;
+    for (let strandIndex = 0; strandIndex < this.cometTrails.length; strandIndex++) {
+      const trail = this.cometTrails[strandIndex];
+      const linePos = trail.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const offset = strandIndex === 1 ? 0.013 : strandIndex === 2 ? -0.016 : 0;
+      for (let i = 0; i < linePos.count; i++) {
+        const u = trailStart + (progress - trailStart) * (i / (linePos.count - 1));
+        const p = at(u, this.tmpV, offset);
+        linePos.setXYZ(i, p.x, p.y, p.z);
+      }
+      linePos.needsUpdate = true;
+      this.cometTrailMats[strandIndex].opacity = [0.82, 0.43, 0.25][strandIndex];
     }
-    linePos.needsUpdate = true;
-    this.cometTrailMat.opacity = 0.9;
 
     const particlePos = this.cometParticles.geometry.getAttribute("position") as THREE.BufferAttribute;
     for (let i = 0; i < particlePos.count; i++) {
       const seed = this.cometParticleSeeds[i * 3];
       const spreadX = this.cometParticleSeeds[i * 3 + 1];
       const spreadY = this.cometParticleSeeds[i * 3 + 2];
-      const u = progress - seed * 0.34;
+      const u = progress - seed * 0.52;
       const p = at(u, this.tmpV);
       const spread = 0.002 + seed * 0.014;
       particlePos.setXYZ(i, p.x + spreadX * spread, p.y + spreadY * spread, p.z);
