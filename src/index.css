@@ -4,10 +4,6 @@
 @import "@fontsource/inter/latin-500.css";
 @import "@fontsource/inter/latin-700.css";
 
-:root {
-  --bar: max(0px, calc((100vh - 100vw / 2.39) / 2));
-}
-
 html,
 body,
 #root {
@@ -15,6 +11,20 @@ body,
   margin: 0;
   background: #000;
   overflow: hidden;
+}
+
+.app-shell {
+  --frame-width: min(100vw, 177.7778vh);
+  --frame-height: min(100vh, 56.25vw);
+}
+
+.cinema-frame {
+  position: relative;
+  width: var(--frame-width);
+  height: var(--frame-height);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  isolation: isolate;
 }
 
 body {
@@ -26,35 +36,6 @@ body {
 canvas {
   /* the canvas never repaints through the compositor's text path */
   touch-action: none;
-}
-
-.bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: var(--bar);
-  background: #000;
-  z-index: 15;
-  pointer-events: none;
-  will-change: transform;
-}
-.bar-top {
-  top: 0;
-  animation: barIn 3s cubic-bezier(0.22, 0.7, 0.1, 1) 0.2s both;
-  transform-origin: top;
-}
-.bar-bottom {
-  bottom: 0;
-  animation: barIn 3s cubic-bezier(0.22, 0.7, 0.1, 1) 0.2s both;
-  transform-origin: bottom;
-}
-@keyframes barIn {
-  from {
-    transform: scaleY(0);
-  }
-  to {
-    transform: scaleY(1);
-  }
 }
 
 /* ------------------------------------------------------------ opening title card */
@@ -104,7 +85,7 @@ canvas {
   position: absolute;
   left: 0;
   right: 0;
-  top: 70%;
+  top: 49%;
   z-index: 12;
   display: flex;
   flex-direction: column;
@@ -135,6 +116,11 @@ canvas {
   padding-left: 0.4em;
   filter: drop-shadow(0 0 18px rgba(255, 170, 40, 0.45));
 }
+.brand-long {
+  font-size: clamp(24px, 4.5vw, 76px);
+  letter-spacing: 0.16em;
+  padding-left: 0.16em;
+}
 .glyph {
   display: inline-block;
   opacity: 0;
@@ -145,6 +131,10 @@ canvas {
   -webkit-text-fill-color: transparent;
   will-change: transform, opacity;
   backface-visibility: hidden;
+}
+.glyph-space {
+  width: 0.58em;
+  flex: 0 0 0.58em;
 }
 .brand-rule {
   width: min(30vw, 420px);
@@ -161,9 +151,9 @@ canvas {
   margin-top: clamp(10px, 1.4vw, 22px);
   font-family: "Inter", system-ui, sans-serif;
   font-weight: 300;
-  font-size: clamp(9px, 0.95vw, 15px);
-  letter-spacing: 0.62em;
-  padding-left: 0.62em;
+  font-size: clamp(13px, 1.5vw, 21px);
+  letter-spacing: 0.34em;
+  padding-left: 0.34em;
   color: rgba(255, 224, 168, 0.95);
   white-space: pre;
   opacity: 0;
@@ -171,43 +161,29 @@ canvas {
 }
 
 .replay {
-  position: absolute;
-  left: 50%;
-  bottom: calc(var(--bar) + 26px);
-  transform: translateX(-50%);
-  z-index: 20;
+  position: static;
+  z-index: auto;
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 10px;
-  padding: 11px 26px;
+  gap: 7px;
+  padding: 7px 12px;
   border-radius: 999px;
   border: 1px solid rgba(255, 205, 110, 0.4);
-  background: rgba(20, 10, 0, 0.35);
+  background: rgba(20, 10, 0, 0.45);
   color: rgba(255, 224, 160, 0.95);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.35em;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  white-space: nowrap;
   backdrop-filter: blur(6px);
   cursor: pointer;
-  opacity: 0;
-  animation: fadeIn 1.6s ease 0.6s forwards;
-  transition:
-    background 0.3s,
-    border-color 0.3s,
-    box-shadow 0.3s;
+  transition: opacity 0.5s, background 0.3s, border-color 0.3s, box-shadow 0.3s;
 }
 .replay:hover {
   background: rgba(255, 190, 80, 0.14);
   border-color: rgba(255, 215, 130, 0.9);
   box-shadow: 0 0 30px rgba(255, 170, 40, 0.35);
-}
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 /* equaliser bars scale (compositor-only) instead of animating height */

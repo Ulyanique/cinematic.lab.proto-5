@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { IntroEngine, Stage } from "./intro/Engine";
-import { Score } from "./intro/audio";
 import { HERO_COUNT, TL } from "./intro/timeline";
 import { clamp, easeOutCubic, smoothstep } from "./intro/math";
 
-const BRAND = "CIRCINUS";
-const TAGLINE = "PRECISION   ·   IN EVERY ARC";
-const CARD_TITLE = "CINEMATIC LAB";
-const CARD_SUB = "PROTO · 05";
+const BRAND = "ЯНТАРНЫЙ ЦИРКУЛЬ";
+const TAGLINE = "Вечер ретроспектива";
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const formatTime = (seconds: number) => {
+  const safe = Math.max(0, seconds);
+  const minutes = Math.floor(safe / 60);
+  const remainder = (safe % 60).toFixed(1).padStart(4, "0");
+  return `${String(minutes).padStart(2, "0")}:${remainder}`;
+};
 
 async function loadFonts() {
   if (!document.fonts) return;
@@ -19,16 +22,12 @@ async function loadFonts() {
 
 export default function App() {
   const mountRef = useRef<HTMLDivElement>(null);
-  const progressRef = useRef<HTMLDivElement>(null);
+  const progressRef = useRef<HTMLInputElement>(null);
+  const timeRef = useRef<HTMLSpanElement>(null);
+  const seekingRef = useRef(false);
   const engineRef = useRef<IntroEngine | null>(null);
-  const scoreRef = useRef<Score | null>(null);
-  const soundRef = useRef(false);
 
   // overlays are painted straight from the engine clock (transform / opacity only)
-  const cardRef = useRef<HTMLDivElement>(null);
-  const cardLineRef = useRef<HTMLDivElement>(null);
-  const cardTitleRef = useRef<HTMLDivElement>(null);
-  const cardSubRef = useRef<HTMLDivElement>(null);
   const shadeRef = useRef<HTMLDivElement>(null);
   const letterRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const ruleRef = useRef<HTMLDivElement>(null);
@@ -36,49 +35,31 @@ export default function App() {
 
   const [stage, setStage] = useState<Stage>("approach");
   const [chapter, setChapter] = useState(0);
-  const [sound, setSound] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const controlsTimer = useRef<number | null>(null);
 
-  const getTime = useCallback(() => engineRef.current?.time ?? 0, []);
+  const resetControlsTimer = useCallback(() => {
+    setControlsVisible(true);
+    if (controlsTimer.current !== null) window.clearTimeout(controlsTimer.current);
+    controlsTimer.current = window.setTimeout(() => setControlsVisible(false), 1800);
+  }, []);
 
-  const enableSound = useCallback(() => {
-    if (soundRef.current) return;
-    soundRef.current = true;
-    setSound(true);
-    scoreRef.current?.start(getTime(), getTime);
-  }, [getTime]);
-
-  const toggleSound = useCallback(() => {
-    if (soundRef.current) {
-      soundRef.current = false;
-      setSound(false);
-      scoreRef.current?.stop();
-    } else {
-      enableSound();
-    }
-  }, [enableSound]);
+  useEffect(() => {
+    const onActivity = () => resetControlsTimer();
+    window.addEventListener("pointermove", onActivity);
+    window.addEventListener("pointerdown", onActivity);
+    window.addEventListener("keydown", onActivity);
+    resetControlsTimer();
+    return () => {
+      window.removeEventListener("pointermove", onActivity);
+      window.removeEventListener("pointerdown", onActivity);
+      window.removeEventListener("keydown", onActivity);
+      if (controlsTimer.current !== null) window.clearTimeout(controlsTimer.current);
+    };
+  }, [resetControlsTimer]);
 
   const paint = useCallback((t: number) => {
-    // ---- opening title card
-    const card = cardRef.current;
-    if (card) {
-      const gone = t > 4.8;
-      card.style.visibility = gone ? "hidden" : "visible";
-      if (!gone) {
-        const out = 1 - smoothstep(3.1, 4.5, t);
-        const line = cardLineRef.current!;
-        line.style.transform = `scaleX(${easeOutCubic((t - 0.3) / 1.9)})`;
-        line.style.opacity = String(smoothstep(0.2, 0.9, t) * out);
-        const a = smoothstep(1.0, 2.3, t) * out;
-        const title = cardTitleRef.current!;
-        title.style.opacity = String(a);
-        title.style.transform = `translate3d(0, ${(1 - easeOutCubic((t - 1.0) / 1.6)) * 10}px, 0)`;
-        const b = smoothstep(1.5, 2.8, t) * out;
-        const sub = cardSubRef.current!;
-        sub.style.opacity = String(b * 0.75);
-        sub.style.transform = `translate3d(0, ${(1 - easeOutCubic((t - 1.5) / 1.6)) * 8}px, 0)`;
-      }
-    }
-
     // ---- brand reveal: letter by letter, then a light wave runs across the gold
     const n = BRAND.length;
     const sweepT = t - (TL.logoText + 2.6);
@@ -110,8 +91,6 @@ export default function App() {
     if (!mountRef.current) return;
     let cancelled = false;
     let engine: IntroEngine | null = null;
-    const score = new Score();
-    scoreRef.current = score;
     const q = new URLSearchParams(window.location.search).get("t");
     const fixed = q !== null && !Number.isNaN(parseFloat(q)) ? parseFloat(q) : null;
 
@@ -121,70 +100,59 @@ export default function App() {
       engine = new IntroEngine(
         mountRef.current,
         {
-          onProgress: (f, t) => {
-            if (progressRef.current) progressRef.current.style.transform = `scaleX(${f})`;
+          onProgress: (_f, t) => {
+            if (progressRef.current && !seekingRef.current) progressRef.current.value = String(t);
+            if (timeRef.current) timeRef.current.textContent = `${formatTime(t)} / ${formatTime(TL.end)}`;
             paint(t);
           },
           onChapter: setChapter,
-          onStage: setStage,
+          onStage: (next) => {
+            setStage(next);
+            if (next === "end") setPaused(true);
+          },
         },
         fixed
       );
       engineRef.current = engine;
     });
 
-    // browsers only allow audio after a gesture: start the score on the first interaction
-    const onGesture = () => enableSound();
-    window.addEventListener("pointerdown", onGesture, { once: true });
-    window.addEventListener("keydown", onGesture, { once: true });
-    // keep sound and picture in lock-step when the tab is hidden
-    const onVis = () => {
-      if (!soundRef.current) return;
-      if (document.hidden) score.suspend();
-      else score.resume();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
     return () => {
       cancelled = true;
-      window.removeEventListener("pointerdown", onGesture);
-      window.removeEventListener("keydown", onGesture);
-      document.removeEventListener("visibilitychange", onVis);
-      score.stop();
       engine?.dispose();
       engineRef.current = null;
     };
-  }, [enableSound, paint]);
+  }, [paint]);
+
+  const togglePlayback = () => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (engine.isPaused) {
+      engine.resume();
+      setPaused(false);
+    } else {
+      engine.pause();
+      setPaused(true);
+    }
+  };
 
   const replay = () => {
     engineRef.current?.restart();
+    setPaused(false);
     setChapter(0);
-    if (soundRef.current) scoreRef.current?.start(0, getTime);
   };
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-black select-none" style={{ cursor: "default" }}>
+    <div
+      className="app-shell fixed inset-0 grid place-items-center overflow-hidden bg-black select-none"
+      style={{ cursor: controlsVisible ? "default" : "none" }}
+    >
+      <div className="cinema-frame">
       <div ref={mountRef} className="absolute inset-0" />
-
-      {/* cinematic letterbox */}
-      <div className="bar bar-top" />
-      <div className="bar bar-bottom" />
-
-      {/* opening title card */}
-      <div ref={cardRef} className="card">
-        <div ref={cardTitleRef} className="card-title">
-          {CARD_TITLE}
-        </div>
-        <div ref={cardLineRef} className="card-line" />
-        <div ref={cardSubRef} className="card-sub">
-          {CARD_SUB}
-        </div>
-      </div>
 
       {/* chapter HUD */}
       <div
         className="absolute left-[4vw] z-10 font-mono text-[11px] tracking-[0.35em] text-amber-200/80"
-        style={{ bottom: "calc(var(--bar) + 22px)" }}
+        style={{ bottom: "56px" }}
       >
         <div
           className="transition-[opacity,transform] duration-500"
@@ -196,40 +164,17 @@ export default function App() {
         </div>
       </div>
 
-      {/* sound toggle */}
-      <button
-        onPointerDown={(e) => e.stopPropagation()} // the global first-gesture hook must not fight the toggle
-        onClick={toggleSound}
-        className="absolute right-[4vw] z-20 flex items-center gap-2 rounded-full border border-amber-300/30 bg-black/30 px-4 py-2 font-mono text-[10px] tracking-[0.3em] text-amber-200/90 backdrop-blur-sm transition hover:border-amber-300/80 hover:bg-amber-300/10"
-        style={{ bottom: "calc(var(--bar) + 18px)" }}
-      >
-        <span className="flex h-3 items-end gap-[2px]">
-          {[0, 1, 2, 3].map((i) => (
-            <span
-              key={i}
-              className="w-[2px] origin-bottom bg-amber-300"
-              style={{
-                height: 12,
-                transform: sound ? undefined : "scaleY(0.25)",
-                animation: sound ? `eq ${0.7 + i * 0.17}s ease-in-out ${i * 0.1}s infinite alternate` : undefined,
-              }}
-            />
-          ))}
-        </span>
-        {sound ? "SOUND ON" : "SOUND OFF"}
-      </button>
-
       {/* brand title under the compass – always mounted, painted from the film clock */}
       <div className="brand-wrap">
         <div ref={shadeRef} className="brand-shade" />
-        <div className="brand" aria-label={BRAND}>
+        <div className="brand brand-long" aria-label={BRAND}>
           {BRAND.split("").map((ch, i) => (
             <span
               key={i}
               ref={(el) => {
                 letterRefs.current[i] = el;
               }}
-              className="glyph"
+              className={ch === " " ? "glyph glyph-space" : "glyph"}
               aria-hidden="true"
             >
               {ch}
@@ -242,20 +187,49 @@ export default function App() {
         </div>
       </div>
 
-      {/* replay */}
-      {stage === "end" && (
-        <button onClick={replay} className="replay">
-          <span className="text-base leading-none">↻</span> ПОВТОРИТЬ
-        </button>
-      )}
-
-      {/* progress */}
-      <div className="absolute inset-x-0 bottom-0 z-20 h-[2px] bg-amber-200/10">
-        <div
+      {/* seekable film timeline with an explicit seconds readout */}
+      <div
+        className="absolute inset-x-[3vw] bottom-[8px] z-20 flex items-center gap-3 transition-opacity duration-500"
+        style={{ opacity: controlsVisible ? 1 : 0, pointerEvents: controlsVisible ? "auto" : "none" }}
+      >
+        {stage !== "end" && (
+          <button
+            type="button"
+            onClick={togglePlayback}
+            aria-label={paused ? "Продолжить воспроизведение" : "Поставить на паузу"}
+            className="min-w-[94px] rounded-full border border-amber-300/35 bg-black/40 px-3 py-1.5 font-mono text-[9px] tracking-[0.2em] text-amber-200/90 hover:border-amber-300/80"
+          >
+            {paused ? "ПРОДОЛЖИТЬ" : "ПАУЗА"}
+          </button>
+        )}
+        <span ref={timeRef} className="min-w-[92px] font-mono text-[10px] tracking-[0.18em] text-amber-200/80">
+          00:00.0 / 00:43.5
+        </span>
+        <input
           ref={progressRef}
-          className="h-full origin-left bg-gradient-to-r from-amber-700 via-amber-300 to-amber-100"
-          style={{ transform: "scaleX(0)" }}
+          aria-label="Перемотка по таймлайну, секунды"
+          type="range"
+          min={0}
+          max={TL.end}
+          step={0.1}
+          defaultValue={0}
+          onPointerDown={() => { seekingRef.current = true; }}
+          onPointerUp={() => { seekingRef.current = false; }}
+          onPointerCancel={() => { seekingRef.current = false; }}
+          onBlur={() => { seekingRef.current = false; }}
+          onInput={(event) => {
+            const seconds = Number(event.currentTarget.value);
+            if (timeRef.current) timeRef.current.textContent = `${formatTime(seconds)} / ${formatTime(TL.end)}`;
+            engineRef.current?.seek(seconds);
+          }}
+          className="h-5 min-w-0 flex-1 cursor-pointer accent-amber-300"
         />
+        {stage === "end" && (
+          <button type="button" onClick={replay} className="replay replay-inline">
+            <span className="text-base leading-none">↻</span> ПОВТОРИТЬ
+          </button>
+        )}
+      </div>
       </div>
     </div>
   );
