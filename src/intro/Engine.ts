@@ -690,8 +690,11 @@ export class IntroEngine {
 
     const head = at(progress, this.tmpV);
     this.cometHead.position.copy(head);
-    this.billboard(this.cometHead, 2.2);
-    this.cometHeadMat.uniforms.uI.value = 0.8 + 0.5 * Math.sin(t * 28);
+    // Scale by camera distance so the spark stays a compact point instead of blooming
+    // into a screen-filling flare when its NDC depth happens to be near the camera.
+    const apparentSize = head.distanceTo(this.camera.position) * 0.035;
+    this.billboard(this.cometHead, apparentSize);
+    this.cometHeadMat.uniforms.uI.value = 0.22 + 0.07 * Math.sin(t * 28);
   }
 
   private apply(t: number, warm = false) {
