@@ -313,7 +313,7 @@ export class IntroEngine {
 
     // ---------------------------------------------------------------- blast particles
     {
-      const n = 8000;
+      const n = 3200;
       const rand = mulberry32(2024);
       const dir = new Float32Array(n * 3);
       const info = new Float32Array(n * 3);
@@ -808,12 +808,13 @@ export class IntroEngine {
     U.uBlastT.value = post ? tl : -1;
     U.uEdge.value = 0.72 + k2 * 0.45 + (post ? 0.55 * Math.exp(-tl * 2.0) : 0);
     U.uFogDensity.value = lerp(0.0092, 0.0068, smoothstep(0, 9, t));
-    U.uDim.value = post ? lerp(1, 0.025, smoothstep(1.5, 5, tl)) : 1;
-    U.uBlastLight.value = post ? 9 * Math.exp(-tl * 3.4) + 0.55 * Math.exp(-tl * 0.8) + 0.2 : 1.1 * k2;
+    const blastShade = post ? 1 - 0.68 * Math.exp(-tl * 0.9) : 1;
+    U.uDim.value = (post ? lerp(1, 0.025, smoothstep(1.5, 5, tl)) : 1) * blastShade;
+    U.uBlastLight.value = post ? 1.6 * Math.exp(-tl * 3.4) + 0.32 * Math.exp(-tl * 0.8) + 0.1 : 0.9 * k2;
 
     this.sky.position.copy(cam.position);
     this.skyMat.uniforms.uGlow.value = k2 * 0.25 + (post ? 0.38 * Math.exp(-tl * 1.5) : 0);
-    this.skyMat.uniforms.uDim.value = lerp(1, 0.06, smoothstep(TL.logoText, TL.end, t));
+    this.skyMat.uniforms.uDim.value = lerp(1, 0.06, smoothstep(TL.logoText, TL.end, t)) * blastShade;
 
     // ------------------------------------------------ monoliths
     let chapter = 0;
@@ -870,13 +871,13 @@ export class IntroEngine {
       this.core.visible = tl < 2.5;
       this.core.scale.setScalar(g);
       this.coreMat.uniforms.uDisp.value = 0.8 + g * 0.15;
-      this.coreMat.uniforms.uI.value = 0.52 * Math.exp(-tl * 3.4);
+      this.coreMat.uniforms.uI.value = 0.34 * Math.exp(-tl * 3.4);
       this.shell.visible = tl < 3;
       this.shell.scale.setScalar(2 + tl * 48);
-      this.shellMat.uniforms.uI.value = 0.28 * Math.exp(-tl * 2.1);
+      this.shellMat.uniforms.uI.value = 0.16 * Math.exp(-tl * 2.1);
       this.flare.visible = tl < 4;
-      this.billboard(this.flare, 8 + tl * 12);
-      this.flareMat.uniforms.uI.value = 0.28 * Math.exp(-tl * 2.8);
+      this.billboard(this.flare, 10 + tl * 15);
+      this.flareMat.uniforms.uI.value = 0.42 * Math.exp(-tl * 2.8);
       this.ring.visible = tl < 7;
       this.ringMat.uniforms.uR.value = tl * 66;
       this.ringMat.uniforms.uW.value = 1.4 + tl * 1.8;
