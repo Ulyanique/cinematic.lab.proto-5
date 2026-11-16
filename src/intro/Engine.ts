@@ -127,7 +127,7 @@ export class IntroEngine {
       fragmentShader: S.SKY_FRAG,
       side: THREE.BackSide,
       depthWrite: false,
-      uniforms: { uTime: this.U.uTime, uGlow: { value: 0 }, uFlame: { value: 1 } },
+      uniforms: { uTime: this.U.uTime, uGlow: { value: 0 }, uFlame: { value: 1 }, uDim: { value: 1 } },
     });
     this.sky = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 20), this.skyMat);
     this.sky.renderOrder = -10;
@@ -614,13 +614,14 @@ export class IntroEngine {
     U.uTime.value = t;
     U.uBuildR.value = 10 + t * 55;
     U.uBlastT.value = post ? tl : -1;
-    U.uEdge.value = 1.0 + k2 * 0.7 + (post ? 0.8 * Math.exp(-tl * 2.0) : 0);
+    U.uEdge.value = 0.72 + k2 * 0.45 + (post ? 0.55 * Math.exp(-tl * 2.0) : 0);
     U.uFogDensity.value = lerp(0.0092, 0.0068, smoothstep(0, 9, t));
-    U.uDim.value = post ? lerp(1, 0.5, smoothstep(1.5, 5, tl)) : 1;
+    U.uDim.value = post ? lerp(1, 0.38, smoothstep(1.5, 5, tl)) : 1;
     U.uBlastLight.value = post ? 40 * Math.exp(-tl * 3.4) + 1.0 * Math.exp(-tl * 0.8) + 0.3 : 1.6 * k2;
 
     this.sky.position.copy(cam.position);
     this.skyMat.uniforms.uGlow.value = k2 * 0.35 + (post ? 1.3 * Math.exp(-tl * 1.5) : 0);
+    this.skyMat.uniforms.uDim.value = lerp(1, 0.62, smoothstep(TL.logoText, TL.end, t));
 
     // ------------------------------------------------ monoliths
     let chapter = 0;
@@ -699,12 +700,14 @@ export class IntroEngine {
     this.haloMat.uniforms.uTime.value = t;
 
     // ------------------------------------------------ post stack
-    this.bloom.strength = 0.42 + 0.35 * kImp + (post ? 1.4 * Math.exp(-tl * 2.6) : 0);
+    this.bloom.strength = 0.42 + 0.35 * kImp + (post ? 0.75 * Math.exp(-tl * 2.6) : 0);
     this.bloom.radius = 0.8;
     this.bloom.threshold = 1.0;
     const pu = this.post.uniforms;
-    const flashPre = 0.5 * Math.pow(smoothstep(TL.explode - 0.45, TL.explode, t), 2);
-    pu.uFlash.value = post ? 4.2 * Math.exp(-tl * 7) + 0.2 * Math.exp(-tl * 1.5) : flashPre;
+    // Warm, brief ignition glow only; let the burst particles carry the explosion instead
+    // of washing the frame out with a white flash.
+    const flashPre = 0.06 * Math.pow(smoothstep(TL.explode - 0.35, TL.explode, t), 2);
+    pu.uFlash.value = post ? 0.38 * Math.exp(-tl * 7) + 0.08 * Math.exp(-tl * 1.5) : flashPre;
     pu.uAber.value = 0.0004 + kFx * kFx * 0.004 + (post ? 0.012 * Math.exp(-tl * 2.2) : 0);
     pu.uZoom.value = post ? 0.34 * Math.exp(-tl * 3.0) : 0.07 * k3;
     pu.uVig.value = 0.55;

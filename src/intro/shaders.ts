@@ -141,13 +141,13 @@ void main(){
 
   float e=min(min(vBary.x,vBary.y),vBary.z);
   float fw=fwidth(e);
-  float line=1.-smoothstep(0.,fw*1.5,e);
-  float halo=1.-smoothstep(0.,fw*8.,e);
+  float line=1.-smoothstep(0.,fw*0.9,e);
+  float halo=1.-smoothstep(0.,fw*5.,e);
   float far=1./(1.+fw*26.);
   float pulse=0.72+0.28*sin(vWorld.x*0.045+vWorld.z*0.06-uTime*1.3+vRand*6.);
-  vec3 edgeCol=vec3(1.0,0.62,0.13);
-  float eI=uEdge*(1.+uFocus*1.6+vShock*4.)*pulse*far;
-  col+=edgeCol*(line*1.9+halo*0.16)*eI;
+  vec3 edgeCol=vec3(0.62,0.34,0.10);
+  float eI=uEdge*(1.+uFocus*1.3+vShock*3.)*pulse*far;
+  col+=edgeCol*(line*1.05+halo*0.08)*eI;
   col+=vec3(1.0,0.8,0.45)*vShock*0.5;
 
   vec3 toB=uBlastPos-vWorld;
@@ -286,6 +286,7 @@ varying vec3 vDir;
 uniform float uTime;
 uniform float uGlow;
 uniform float uFlame;
+uniform float uDim;
 ${NOISE}
 void main(){
   vec3 d=normalize(vDir);
@@ -301,6 +302,7 @@ void main(){
   col+=vec3(1.0,0.48,0.09)*flame*0.55*uFlame;
   col*=1.+uGlow*2.2;
   col+=vec3(1.0,0.6,0.25)*uGlow*0.4;
+  col*=uDim;
   gl_FragColor=vec4(col,1.);
 }
 `;
@@ -355,6 +357,7 @@ uniform float uPx;
 uniform float uTime;
 varying float vA;
 varying float vHeat;
+varying float vAngle;
 void main(){
   float speed=aInfo.x;
   float rnd=aInfo.y;
@@ -385,7 +388,13 @@ void main(){
     sz*=1.0+0.2*sin(uTime*2.+rnd*30.);
   }
   vec4 mv=viewMatrix*vec4(pos,1.);
-  gl_Position=projectionMatrix*mv;
+  vec4 clip=projectionMatrix*mv;
+  gl_Position=clip;
+  vec3 velocity=aDir*speed;
+  if(uT>=0.) velocity.y-=uT*(1.5+rnd*3.);
+  vec4 ahead=projectionMatrix*viewMatrix*vec4(pos+velocity*0.08,1.);
+  vec2 motion=ahead.xy/max(ahead.w,1e-4)-clip.xy/max(clip.w,1e-4);
+  vAngle=atan(motion.y,motion.x);
   float d=max(-mv.z,0.5);
   gl_PointSize=clamp(sz*uPx*(60./d),1.,40.*uPx);
   vA=a;
@@ -397,14 +406,20 @@ export const BLAST_FRAG = /* glsl */ `
 precision highp float;
 varying float vA;
 varying float vHeat;
+varying float vAngle;
 void main(){
-  float d=length(gl_PointCoord-.5);
-  float a=smoothstep(.5,0.,d);
-  a*=a;
-  vec3 hot=vec3(1.0,0.92,0.7);
-  vec3 cool=vec3(1.0,0.5,0.08);
-  vec3 col=mix(cool,hot,clamp(vHeat,0.,1.))*(1.2+vHeat*2.5);
-  gl_FragColor=vec4(col*0.55,a*vA*0.45);
+  // Rotate each spark along its projected velocity to read as a short firework trail.
+  vec2 p=gl_PointCoord-0.5;
+  float c=cos(vAngle), s=sin(vAngle);
+  p=mat2(c,-s,s,c)*p;
+  float streak=length(vec2(p.x*0.52,p.y*1.8));
+  float a=1.-smoothstep(0.08,0.48,streak);
+  float core=1.-smoothstep(0.02,0.16,length(p));
+  a=max(a*0.75,core);
+  vec3 hot=vec3(1.0,0.72,0.34);
+  vec3 cool=vec3(1.0,0.24,0.025);
+  vec3 col=mix(cool,hot,clamp(vHeat,0.,1.))*(1.0+vHeat*2.0);
+  gl_FragColor=vec4(col*0.72,a*vA*0.72);
 }
 `;
 
