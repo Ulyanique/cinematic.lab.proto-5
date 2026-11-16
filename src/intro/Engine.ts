@@ -899,7 +899,7 @@ export class IntroEngine {
     this.haloMat.uniforms.uTime.value = t;
 
     // ------------------------------------------------ post stack
-    this.bloom.strength = 0.42 + 0.28 * kImp + (post ? 0.18 * Math.exp(-tl * 2.6) : 0);
+    this.bloom.strength = 0.34 + 0.28 * kImp + (post ? 0.18 * Math.exp(-tl * 2.6) : 0);
     this.bloom.radius = 0.8;
     this.bloom.threshold = 1.0;
     const pu = this.post.uniforms;

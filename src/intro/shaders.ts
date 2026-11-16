@@ -130,9 +130,9 @@ void main(){
   float fres=pow(1.-ndv,5.);
   vec3 F0=vec3(1.0,0.70,0.26);
   vec3 F=mix(F0,vec3(1.0,0.93,0.72),fres);
-  vec3 col=envGold(R,rough,uTime)*F*(0.12+0.5*fvar);
+  vec3 col=envGold(R,rough,uTime)*F*(0.09+0.37*fvar);
   vec3 L=normalize(vec3(0.35,0.65,-0.45));
-  col+=F0*vec3(1.0,0.55,0.22)*0.10*max(dot(n,L),0.);
+  col+=F0*vec3(1.0,0.55,0.22)*0.07*max(dot(n,L),0.);
 
   float hm=step(0.,vH);
   float hn=clamp(vH,0.,1.);
