@@ -132,6 +132,10 @@ canvas {
   will-change: transform, opacity;
   backface-visibility: hidden;
 }
+.glyph-space {
+  width: 0.58em;
+  flex: 0 0 0.58em;
+}
 .brand-rule {
   width: min(30vw, 420px);
   height: 1px;
@@ -147,7 +151,7 @@ canvas {
   margin-top: clamp(10px, 1.4vw, 22px);
   font-family: "Inter", system-ui, sans-serif;
   font-weight: 300;
-  font-size: clamp(12px, 1.3vw, 19px);
+  font-size: clamp(13px, 1.5vw, 21px);
   letter-spacing: 0.34em;
   padding-left: 0.34em;
   color: rgba(255, 224, 168, 0.95);

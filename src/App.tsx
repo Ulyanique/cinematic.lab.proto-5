@@ -174,7 +174,7 @@ export default function App() {
               ref={(el) => {
                 letterRefs.current[i] = el;
               }}
-              className="glyph"
+              className={ch === " " ? "glyph glyph-space" : "glyph"}
               aria-hidden="true"
             >
               {ch}
