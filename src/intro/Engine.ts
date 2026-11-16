@@ -690,7 +690,7 @@ export class IntroEngine {
 
     const progress = clamp(t / TL.explode);
     const orbitAt = (q: number, out: THREE.Vector3) => {
-      const phase = q * Math.PI * 2 * 1.45;
+      const phase = q * Math.PI * 2 * 0.82;
       const radius = 42 + 4 * Math.sin(phase * 1.7);
       return out.set(
         Math.sin(phase) * radius,
@@ -699,11 +699,11 @@ export class IntroEngine {
       );
     };
     const pathAt = (u: number, out: THREE.Vector3, offset = 0) => {
-      if (u < 0.14) {
-        const q = smoothstep(0, 1, u / 0.14);
+      if (u < 0.24) {
+        const q = smoothstep(0, 1, u / 0.24);
         out.set(0, 10 + 2 * Math.sin(q * Math.PI), THREE.MathUtils.lerp(150, 42, q));
       } else if (u < 0.84) {
-        orbitAt((u - 0.14) / 0.70, out);
+        orbitAt((u - 0.24) / 0.60, out);
       } else {
         const q = (u - 0.84) / 0.16;
         orbitAt(1, this.cometP0);
