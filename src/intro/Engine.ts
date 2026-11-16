@@ -690,7 +690,7 @@ export class IntroEngine {
 
     const progress = clamp(t / TL.explode);
     const orbitAt = (q: number, out: THREE.Vector3) => {
-      const phase = q * Math.PI * 2 * 0.82;
+      const phase = smoothstep(0, 1, q) * Math.PI * 2 * 0.82;
       const radius = 42 + 4 * Math.sin(phase * 1.7);
       return out.set(
         Math.sin(phase) * radius,
@@ -705,10 +705,9 @@ export class IntroEngine {
       } else if (u < 0.84) {
         orbitAt((u - 0.24) / 0.60, out);
       } else {
-        const q = (u - 0.84) / 0.16;
+        const q = smoothstep(0, 1, (u - 0.84) / 0.16);
         orbitAt(1, this.cometP0);
-        orbitAt(1.002, this.cometP1);
-        this.cometTangent.copy(this.cometP1).sub(this.cometP0).normalize();
+        this.cometTangent.set(-this.cometP0.x, 0.5, -this.cometP0.z).normalize();
         this.cometP1.copy(this.cometP0).addScaledVector(this.cometTangent, 14);
         this.cometP2.copy(BLAST_POS);
         this.cometP2.y += 9;
@@ -720,9 +719,8 @@ export class IntroEngine {
           .addScaledVector(BLAST_POS, q * q * q);
       }
       const envelope = Math.sin(Math.PI * u);
-      out.x += offset + envelope * 1.3 * Math.sin(u * Math.PI * 5 + t * 0.16);
-      out.y += offset * 0.7 + envelope * 0.9 * Math.sin(u * Math.PI * 3.4 + t * 0.12);
-      out.z += envelope * 0.7 * Math.cos(u * Math.PI * 4 + t * 0.1);
+      out.x += offset * envelope;
+      out.y += offset * 0.7 * envelope;
       return out;
     };
 
