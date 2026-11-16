@@ -640,46 +640,50 @@ export class IntroEngine {
   }
 
   private updateComet(t: number) {
-    const startT = TL.explode - 3.2;
-    const active = t >= startT && t < TL.explode;
+    // The comet is a continuous foreground motif for the whole film, then its final
+    // trajectory converges onto the blast point immediately before the fireworks.
+    const active = t >= 0 && t < TL.explode;
     this.cometTrail.visible = active;
     this.cometParticles.visible = active;
     this.cometHead.visible = active;
     if (!active) return;
 
-    const raw = clamp((t - startT) / (TL.explode - startT));
-    const progress = smoothstep(0, 1, raw);
+    const progress = clamp(t / TL.explode);
     const target = BLAST_POS.clone().project(this.camera);
-    const sx = -1.15;
-    const sy = target.y + 0.22;
-    const cx = (sx + target.x) * 0.5;
-    const cy = (sy + target.y) * 0.5 + 0.16;
-    const z = target.z;
+    const converge = smoothstep(TL.explode - 4.2, TL.explode, t);
+    const sx = -0.95;
+    const sy = 0.18 + 0.08 * Math.sin(t * 0.24);
+    const ex = THREE.MathUtils.lerp(0.76, target.x, converge);
+    const ey = THREE.MathUtils.lerp(-0.08, target.y, converge);
+    const ez = THREE.MathUtils.lerp(0, target.z, converge);
+    const cx = (sx + ex) * 0.5;
+    const cy = (sy + ey) * 0.5 + 0.28 + 0.08 * Math.sin(t * 0.3);
     const at = (u: number, out: THREE.Vector3) => {
       const v = 1 - u;
-      const x = v * v * sx + 2 * v * u * cx + u * u * target.x;
-      const y = v * v * sy + 2 * v * u * cy + u * u * target.y;
+      const x = v * v * sx + 2 * v * u * cx + u * u * ex;
+      const y = v * v * sy + 2 * v * u * cy + u * u * ey;
+      const z = ez + 0.025 * Math.sin(u * 15 + t * 2);
       return out.set(x, y, z).unproject(this.camera);
     };
 
     const linePos = this.cometTrail.geometry.getAttribute("position") as THREE.BufferAttribute;
-    const trailStart = Math.max(0, progress - 0.42);
+    const trailStart = progress - 0.34;
     for (let i = 0; i < linePos.count; i++) {
       const u = trailStart + (progress - trailStart) * (i / (linePos.count - 1));
       const p = at(u, this.tmpV);
       linePos.setXYZ(i, p.x, p.y, p.z);
     }
     linePos.needsUpdate = true;
-    this.cometTrailMat.opacity = 0.2 + 0.72 * Math.min(1, raw * 5);
+    this.cometTrailMat.opacity = 0.9;
 
     const particlePos = this.cometParticles.geometry.getAttribute("position") as THREE.BufferAttribute;
     for (let i = 0; i < particlePos.count; i++) {
       const seed = this.cometParticleSeeds[i * 3];
       const spreadX = this.cometParticleSeeds[i * 3 + 1];
       const spreadY = this.cometParticleSeeds[i * 3 + 2];
-      const u = Math.max(0, progress - seed * 0.42);
+      const u = progress - seed * 0.34;
       const p = at(u, this.tmpV);
-      const spread = 0.003 + seed * 0.012;
+      const spread = 0.002 + seed * 0.014;
       particlePos.setXYZ(i, p.x + spreadX * spread, p.y + spreadY * spread, p.z);
     }
     particlePos.needsUpdate = true;
@@ -729,12 +733,12 @@ export class IntroEngine {
     U.uBlastT.value = post ? tl : -1;
     U.uEdge.value = 0.72 + k2 * 0.45 + (post ? 0.55 * Math.exp(-tl * 2.0) : 0);
     U.uFogDensity.value = lerp(0.0092, 0.0068, smoothstep(0, 9, t));
-    U.uDim.value = post ? lerp(1, 0.22, smoothstep(1.5, 5, tl)) : 1;
+    U.uDim.value = post ? lerp(1, 0.12, smoothstep(1.5, 5, tl)) : 1;
     U.uBlastLight.value = post ? 40 * Math.exp(-tl * 3.4) + 1.0 * Math.exp(-tl * 0.8) + 0.3 : 1.6 * k2;
 
     this.sky.position.copy(cam.position);
     this.skyMat.uniforms.uGlow.value = k2 * 0.35 + (post ? 1.3 * Math.exp(-tl * 1.5) : 0);
-    this.skyMat.uniforms.uDim.value = lerp(1, 0.42, smoothstep(TL.logoText, TL.end, t));
+    this.skyMat.uniforms.uDim.value = lerp(1, 0.22, smoothstep(TL.logoText, TL.end, t));
 
     // ------------------------------------------------ monoliths
     let chapter = 0;
