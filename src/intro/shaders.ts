@@ -401,7 +401,7 @@ void main(){
   vec2 motion=ahead.xy/max(ahead.w,1e-4)-clip.xy/max(clip.w,1e-4);
   vAngle=atan(motion.y,motion.x);
   float d=max(-mv.z,0.5);
-  gl_PointSize=clamp(sz*uPx*(78./d),1.,40.*uPx);
+  gl_PointSize=clamp(sz*uPx*(62./d),1.,28.*uPx);
   vA=a;
   vHeat=heat;
   vRand=rnd;
@@ -425,10 +425,10 @@ void main(){
   a=max(a*0.75,core);
   vec3 ember=vec3(1.0,0.16,0.025);
   vec3 gold=vec3(1.0,0.48,0.08);
-  vec3 pale=vec3(1.0,0.82,0.38);
+  vec3 pale=vec3(1.0,0.62,0.20);
   vec3 col=mix(ember,gold,smoothstep(0.1,0.7,vHeat));
-  col=mix(col,pale,clamp(vHeat*0.55+fract(vRand*17.)*0.18,0.,0.72));
-  gl_FragColor=vec4(col*(0.85+vHeat*1.1),a*vA*0.82);
+  col=mix(col,pale,clamp(vHeat*0.45+fract(vRand*17.)*0.12,0.,0.58));
+  gl_FragColor=vec4(col*(0.6+vHeat*0.65),a*vA*0.62);
 }
 `;
 

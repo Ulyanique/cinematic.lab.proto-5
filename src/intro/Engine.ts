@@ -313,7 +313,7 @@ export class IntroEngine {
 
     // ---------------------------------------------------------------- blast particles
     {
-      const n = 16000;
+      const n = 8000;
       const rand = mulberry32(2024);
       const dir = new Float32Array(n * 3);
       const info = new Float32Array(n * 3);
@@ -809,10 +809,10 @@ export class IntroEngine {
     U.uEdge.value = 0.72 + k2 * 0.45 + (post ? 0.55 * Math.exp(-tl * 2.0) : 0);
     U.uFogDensity.value = lerp(0.0092, 0.0068, smoothstep(0, 9, t));
     U.uDim.value = post ? lerp(1, 0.025, smoothstep(1.5, 5, tl)) : 1;
-    U.uBlastLight.value = post ? 40 * Math.exp(-tl * 3.4) + 1.0 * Math.exp(-tl * 0.8) + 0.3 : 1.6 * k2;
+    U.uBlastLight.value = post ? 9 * Math.exp(-tl * 3.4) + 0.55 * Math.exp(-tl * 0.8) + 0.2 : 1.1 * k2;
 
     this.sky.position.copy(cam.position);
-    this.skyMat.uniforms.uGlow.value = k2 * 0.35 + (post ? 1.3 * Math.exp(-tl * 1.5) : 0);
+    this.skyMat.uniforms.uGlow.value = k2 * 0.25 + (post ? 0.38 * Math.exp(-tl * 1.5) : 0);
     this.skyMat.uniforms.uDim.value = lerp(1, 0.06, smoothstep(TL.logoText, TL.end, t));
 
     // ------------------------------------------------ monoliths
@@ -870,13 +870,13 @@ export class IntroEngine {
       this.core.visible = tl < 2.5;
       this.core.scale.setScalar(g);
       this.coreMat.uniforms.uDisp.value = 0.8 + g * 0.15;
-      this.coreMat.uniforms.uI.value = 1.3 * Math.exp(-tl * 3.4);
+      this.coreMat.uniforms.uI.value = 0.52 * Math.exp(-tl * 3.4);
       this.shell.visible = tl < 3;
       this.shell.scale.setScalar(2 + tl * 48);
-      this.shellMat.uniforms.uI.value = 0.8 * Math.exp(-tl * 2.1);
+      this.shellMat.uniforms.uI.value = 0.28 * Math.exp(-tl * 2.1);
       this.flare.visible = tl < 4;
-      this.billboard(this.flare, 12 + tl * 22);
-      this.flareMat.uniforms.uI.value = 0.9 * Math.exp(-tl * 2.8);
+      this.billboard(this.flare, 8 + tl * 12);
+      this.flareMat.uniforms.uI.value = 0.28 * Math.exp(-tl * 2.8);
       this.ring.visible = tl < 7;
       this.ringMat.uniforms.uR.value = tl * 66;
       this.ringMat.uniforms.uW.value = 1.4 + tl * 1.8;
@@ -900,14 +900,13 @@ export class IntroEngine {
     this.haloMat.uniforms.uTime.value = t;
 
     // ------------------------------------------------ post stack
-    this.bloom.strength = 0.42 + 0.35 * kImp + (post ? 0.52 * Math.exp(-tl * 2.6) : 0);
+    this.bloom.strength = 0.42 + 0.28 * kImp + (post ? 0.18 * Math.exp(-tl * 2.6) : 0);
     this.bloom.radius = 0.8;
     this.bloom.threshold = 1.0;
     const pu = this.post.uniforms;
     // Warm, brief ignition glow only; let the burst particles carry the explosion instead
     // of washing the frame out with a white flash.
-    const flashPre = 0.018 * Math.pow(smoothstep(TL.explode - 0.35, TL.explode, t), 2);
-    pu.uFlash.value = post ? 0.09 * Math.exp(-tl * 7) + 0.025 * Math.exp(-tl * 1.5) : flashPre;
+    pu.uFlash.value = 0;
     pu.uAber.value = 0.0004 + kFx * kFx * 0.004 + (post ? 0.012 * Math.exp(-tl * 2.2) : 0);
     pu.uZoom.value = post ? 0.34 * Math.exp(-tl * 3.0) : 0.07 * k3;
     pu.uVig.value = 0.55;
