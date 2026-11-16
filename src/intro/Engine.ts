@@ -8,6 +8,7 @@ import { buildHero, buildScenery, buildTerrain } from "./geometry";
 import { clamp, lerp, mulberry32, smoothstep, terrainHeight } from "./math";
 import * as S from "./shaders";
 import { makePlaceholderTexture } from "./textures";
+import { LogoDust, LOGO_H, LOGO_W } from "./logoDust";
 import logoUrl from "../assets/logo.svg?inline";
 import {
   BLAST_POS,
@@ -96,6 +97,8 @@ export class IntroEngine {
   private cometTangent = new THREE.Vector3();
   private logo: THREE.Mesh;
   private logoMaterial: THREE.MeshBasicMaterial;
+  private logoDepthMat: THREE.MeshBasicMaterial;
+  private logoDust: LogoDust;
 
   private raf = 0;
   private clock = 0;
@@ -116,6 +119,7 @@ export class IntroEngine {
   private paused = false;
   private debugLook = new URLSearchParams(window.location.search).get("look");
   private tmpV = new THREE.Vector3();
+  private tmpV2 = new THREE.Vector2();
 
   constructor(container: HTMLElement, events: IntroEvents = {}, fixedT: number | null = null) {
     this.container = container;
@@ -546,18 +550,57 @@ export class IntroEngine {
           "#include <map_fragment>",
           `#include <map_fragment>
           {
+            // brushed-gold grade + a light-from-top-left bevel read from the emblem's own alpha
+            float a0 = diffuseColor.a;
+            float aL = texture2D(map, vMapUv + vec2(-0.0055, 0.0055)).a;
+            float aR = texture2D(map, vMapUv + vec2(0.0055, -0.0055)).a;
+            float aL2 = texture2D(map, vMapUv + vec2(-0.012, 0.012)).a;
+            float aR2 = texture2D(map, vMapUv + vec2(0.012, -0.012)).a;
+            float lit = clamp((aR - aL) + 0.5 * (aR2 - aL2), 0.0, 1.0) * a0;
+            float sh = clamp((aL - aR) + 0.5 * (aL2 - aR2), 0.0, 1.0) * a0;
+            vec3 gold = mix(vec3(1.10, 0.80, 0.40), vec3(1.25, 1.02, 0.70), smoothstep(0.0, 1.0, vMapUv.y));
+            diffuseColor.rgb = diffuseColor.rgb * gold;
+            diffuseColor.rgb += vec3(1.0, 0.88, 0.58) * lit * 1.05;
+            diffuseColor.rgb *= 1.0 - sh * 0.5;
             float d = vMapUv.x * 0.78 + (1.0 - vMapUv.y) * 0.62 - uShine;
             float band = exp(-d * d / 0.0045) + 0.35 * exp(-d * d / 0.03);
             diffuseColor.rgb += vec3(1.0, 0.86, 0.52) * band * 1.35 * diffuseColor.a;
           }`
         );
     };
-    this.logo = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 4.42), this.logoMaterial);
+    const logoGeo = new THREE.PlaneGeometry(LOGO_W, LOGO_H);
+    this.logo = new THREE.Mesh(logoGeo, this.logoMaterial);
     this.logo.position.set(0, 7.35, 0);
     this.logo.renderOrder = 10;
     this.logo.frustumCulled = false;
     this.logo.visible = false;
     this.scene.add(this.logo);
+
+    // fake extrusion: a stack of darker copies behind the face gives the emblem real thickness
+    // that catches the eye when the camera / pointer parallax swings around it
+    this.logoDepthMat = new THREE.MeshBasicMaterial({
+      map: logoTexture,
+      color: 0x8a5a22,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      toneMapped: false,
+      alphaTest: 0.02,
+    });
+    const LAYERS = 9;
+    for (let i = 1; i <= LAYERS; i++) {
+      const layer = new THREE.Mesh(logoGeo, this.logoDepthMat);
+      layer.position.z = -i * 0.045;
+      layer.renderOrder = 9;
+      layer.frustumCulled = false;
+      layer.userData.k = i / LAYERS;
+      this.logo.add(layer);
+    }
+
+    // the emblem assembles out of the blast as ~9000 gold sparks
+    this.logoDust = new LogoDust(logoUrl, BLAST_POS, this.logo.position, this.logoShine, this.U.uTime);
+    this.scene.add(this.logoDust.points);
 
     // ---------------------------------------------------------------- post
     const rt = new THREE.WebGLRenderTarget(w * this.pixelRatio, h * this.pixelRatio, {
@@ -586,6 +629,8 @@ export class IntroEngine {
         uShockAmp: { value: 0 },
         uAspect: { value: w / h },
         uCenter: { value: new THREE.Vector2(0.5, 0.5) },
+        uRays: { value: 0 },
+        uRayCenter: { value: new THREE.Vector2(0.5, 0.6) },
       },
       vertexShader: S.POST_VERT,
       fragmentShader: S.POST_FRAG,
@@ -950,9 +995,13 @@ export class IntroEngine {
     this.blastMat.uniforms.uImplode.value = kImp;
 
     // ------------------------------------------------ final SVG emblem: reveal it as a clean, front-facing vector mark
-    const logoReveal = post ? smoothstep(0.12, 1.65, tl) : 0;
+    // the solid emblem crossfades in only once most sparks have landed on it
+    const logoReveal = post ? smoothstep(1.5, 3.3, tl) : 0;
     this.logo.visible = logoReveal > 0.001;
-    this.logoMaterial.opacity = 0.94 * logoReveal;
+    this.logoMaterial.opacity = 0.96 * logoReveal;
+    this.logoDepthMat.opacity = logoReveal;
+    const buf = this.renderer.getDrawingBufferSize(this.tmpV2);
+    this.logoDust.update(post ? tl : -1, buf.y, post ? 1 - 0.5 * smoothstep(2.8, 4.6, tl) : 1);
     // first sheen as the emblem materialises, then a slow recurring glint
     const sh = tl - 6.0;
     const cycle = sh > 0 ? (sh % 7.5) / 2.2 : 0;
@@ -960,7 +1009,11 @@ export class IntroEngine {
     this.logoShine.value = post ? (sh > 0 ? -0.4 + cycle * 2.1 : -0.4 + first * 2.1) : -1;
     const logoScale = 0.92 + 0.08 * logoReveal;
     this.logo.scale.set(logoScale, logoScale, 1);
-    this.logo.rotation.y = Math.sin(t * 0.4) * 0.015;
+    // a slow pendulum turn lets the thickness and the bevel glint (strongest right after the reveal)
+    const swing = post ? smoothstep(1.5, 5, tl) : 0;
+    this.logo.rotation.y = Math.sin(t * 0.55) * 0.13 * swing - this.pointer.sx * 0.1 * swing;
+    this.logo.rotation.x = Math.sin(t * 0.38 + 1.0) * 0.025 * swing + this.pointer.sy * 0.05 * swing;
+    this.logo.position.y = 7.35 + Math.sin(t * 0.8) * 0.06 * swing;
     const haloI = post ? 0.13 * smoothstep(0.4, 2.4, tl) + 0.65 * Math.exp(-Math.pow((tl - 4.05) / 0.4, 2)) : 0;
     this.halo.visible = post;
     this.billboard(this.halo, 20 + Math.sin(t * 0.6) * 0.6);
@@ -985,6 +1038,12 @@ export class IntroEngine {
     pu.uShockAmp.value = post ? Math.exp(-tl * 1.7) : 0;
     this.tmpV.copy(BLAST_POS).project(cam);
     pu.uCenter.value.set(this.tmpV.x * 0.5 + 0.5, this.tmpV.y * 0.5 + 0.5);
+    // volumetric god rays radiating from behind the emblem; swell as it forms, then settle
+    this.tmpV.copy(this.logo.position).project(cam);
+    pu.uRayCenter.value.set(this.tmpV.x * 0.5 + 0.5, this.tmpV.y * 0.5 + 0.5);
+    pu.uRays.value = post
+      ? smoothstep(2.0, 3.8, tl) * (0.6 + 0.4 * Math.exp(-Math.pow((tl - 4.0) / 0.9, 2))) * (1 - 0.35 * smoothstep(4, 9, tl))
+      : 0;
 
     if (warm) return;
 

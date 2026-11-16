@@ -638,6 +638,8 @@ uniform float uShockR;
 uniform float uShockAmp;
 uniform float uAspect;
 uniform vec2 uCenter;
+uniform float uRays;
+uniform vec2 uRayCenter;
 varying vec2 vUv;
 float hash(vec2 p){ return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453); }
 vec3 sampleCA(vec2 uv){
@@ -665,6 +667,21 @@ void main(){
     col=sampleCA(uv);
   }
   col+=uFlash*vec3(1.0,0.82,0.5);
+  // ---- god rays: radial streaks of the brightest parts, marched towards the emblem
+  if(uRays>0.002){
+    vec2 rd=(uRayCenter-uv)*(1./20.);
+    vec2 rp=uv+rd*hash(uv*vec2(1920.,1080.)+uTime);
+    vec3 acc=vec3(0.);
+    float wgt=1.;
+    for(int i=0;i<20;i++){
+      vec3 sm=texture2D(tDiffuse,rp).rgb;
+      float sl=dot(sm,vec3(0.2126,0.7152,0.0722));
+      acc+=sm*smoothstep(1.6,4.0,sl)*wgt;
+      wgt*=0.94;
+      rp+=rd;
+    }
+    col+=acc*(1./20.)*uRays*vec3(1.0,0.78,0.42)*0.55;
+  }
   // ---- grade: warm toe, gentle shoulder, a touch of saturation in the mids (scene-linear)
   float lum=dot(col,vec3(0.2126,0.7152,0.0722));
   vec3 toe=vec3(0.0035,0.0013,0.0002)*(1.-smoothstep(0.,0.09,lum));
