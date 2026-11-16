@@ -88,7 +88,7 @@ export class IntroEngine {
   private cometParticles: THREE.Points;
   private cometParticleSeeds: Float32Array;
   private cometHead: THREE.Mesh;
-  private cometHeadMat: THREE.MeshBasicMaterial;
+  private cometHeadMat: THREE.ShaderMaterial;
   private cometP0 = new THREE.Vector3();
   private cometP1 = new THREE.Vector3();
   private cometP2 = new THREE.Vector3();
@@ -481,15 +481,9 @@ export class IntroEngine {
     this.flare.frustumCulled = false;
     this.scene.add(this.flare);
 
-    this.cometHeadMat = new THREE.MeshBasicMaterial({
-      color: 0xffd77a,
-      transparent: true,
-      opacity: 0.9,
-      blending: THREE.AdditiveBlending,
-      depthTest: true,
-      depthWrite: false,
-    });
-    this.cometHead = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 1), this.cometHeadMat);
+    this.cometHeadMat = flareMaterial(1.0, 1.0);
+    this.cometHeadMat.depthTest = true;
+    this.cometHead = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.cometHeadMat);
     this.cometHead.renderOrder = 20;
     this.cometHead.frustumCulled = false;
     this.cometHead.visible = false;
@@ -764,9 +758,9 @@ export class IntroEngine {
     particlePos.needsUpdate = true;
 
     pathAt(progress, this.cometHead.position);
-    const pulse = 0.82 + 0.18 * Math.sin(t * 25);
-    this.cometHead.scale.setScalar(pulse);
-    this.cometHeadMat.opacity = 0.9 * pulse;
+    const apparentSize = this.cometHead.position.distanceTo(this.camera.position) * 0.055;
+    this.billboard(this.cometHead, apparentSize);
+    this.cometHeadMat.uniforms.uI.value = 0.38 + 0.08 * Math.sin(t * 25);
   }
 
   private apply(t: number, warm = false) {
