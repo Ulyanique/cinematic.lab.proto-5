@@ -5,8 +5,6 @@ import { clamp, easeOutCubic, smoothstep } from "./intro/math";
 
 const BRAND = "ЯНТАРНЫЙ ЦИРКУЛЬ";
 const TAGLINE = "Вечер ретроспектива";
-const CARD_TITLE = "CINEMATIC LAB";
-const CARD_SUB = "PROTO · 05";
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const formatTime = (seconds: number) => {
@@ -30,10 +28,6 @@ export default function App() {
   const engineRef = useRef<IntroEngine | null>(null);
 
   // overlays are painted straight from the engine clock (transform / opacity only)
-  const cardRef = useRef<HTMLDivElement>(null);
-  const cardLineRef = useRef<HTMLDivElement>(null);
-  const cardTitleRef = useRef<HTMLDivElement>(null);
-  const cardSubRef = useRef<HTMLDivElement>(null);
   const shadeRef = useRef<HTMLDivElement>(null);
   const letterRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const ruleRef = useRef<HTMLDivElement>(null);
@@ -42,50 +36,30 @@ export default function App() {
   const [stage, setStage] = useState<Stage>("approach");
   const [chapter, setChapter] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [endChromeVisible, setEndChromeVisible] = useState(true);
-  const endChromeTimer = useRef<number | null>(null);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const controlsTimer = useRef<number | null>(null);
+
+  const resetControlsTimer = useCallback(() => {
+    setControlsVisible(true);
+    if (controlsTimer.current !== null) window.clearTimeout(controlsTimer.current);
+    controlsTimer.current = window.setTimeout(() => setControlsVisible(false), 1800);
+  }, []);
 
   useEffect(() => {
-    if (endChromeTimer.current !== null) window.clearTimeout(endChromeTimer.current);
-    if (stage !== "end") {
-      setEndChromeVisible(true);
-      return;
-    }
-    endChromeTimer.current = window.setTimeout(() => setEndChromeVisible(false), 2600);
+    const onActivity = () => resetControlsTimer();
+    window.addEventListener("pointermove", onActivity);
+    window.addEventListener("pointerdown", onActivity);
+    window.addEventListener("keydown", onActivity);
+    resetControlsTimer();
     return () => {
-      if (endChromeTimer.current !== null) window.clearTimeout(endChromeTimer.current);
+      window.removeEventListener("pointermove", onActivity);
+      window.removeEventListener("pointerdown", onActivity);
+      window.removeEventListener("keydown", onActivity);
+      if (controlsTimer.current !== null) window.clearTimeout(controlsTimer.current);
     };
-  }, [stage]);
-
-  const revealEndChrome = () => {
-    if (stage !== "end") return;
-    setEndChromeVisible(true);
-    if (endChromeTimer.current !== null) window.clearTimeout(endChromeTimer.current);
-    endChromeTimer.current = window.setTimeout(() => setEndChromeVisible(false), 2600);
-  };
+  }, [resetControlsTimer]);
 
   const paint = useCallback((t: number) => {
-    // ---- opening title card
-    const card = cardRef.current;
-    if (card) {
-      const gone = t > 4.8;
-      card.style.visibility = gone ? "hidden" : "visible";
-      if (!gone) {
-        const out = 1 - smoothstep(3.1, 4.5, t);
-        const line = cardLineRef.current!;
-        line.style.transform = `scaleX(${easeOutCubic((t - 0.3) / 1.9)})`;
-        line.style.opacity = String(smoothstep(0.2, 0.9, t) * out);
-        const a = smoothstep(1.0, 2.3, t) * out;
-        const title = cardTitleRef.current!;
-        title.style.opacity = String(a);
-        title.style.transform = `translate3d(0, ${(1 - easeOutCubic((t - 1.0) / 1.6)) * 10}px, 0)`;
-        const b = smoothstep(1.5, 2.8, t) * out;
-        const sub = cardSubRef.current!;
-        sub.style.opacity = String(b * 0.75);
-        sub.style.transform = `translate3d(0, ${(1 - easeOutCubic((t - 1.5) / 1.6)) * 8}px, 0)`;
-      }
-    }
-
     // ---- brand reveal: letter by letter, then a light wave runs across the gold
     const n = BRAND.length;
     const sweepT = t - (TL.logoText + 2.6);
@@ -167,28 +141,15 @@ export default function App() {
   return (
     <div
       className="app-shell fixed inset-0 grid place-items-center overflow-hidden bg-black select-none"
-      style={{ cursor: "default" }}
-      onPointerMove={revealEndChrome}
-      onPointerDown={revealEndChrome}
+      style={{ cursor: controlsVisible ? "default" : "none" }}
     >
       <div className="cinema-frame">
       <div ref={mountRef} className="absolute inset-0" />
 
-      {/* opening title card */}
-      <div ref={cardRef} className="card">
-        <div ref={cardTitleRef} className="card-title">
-          {CARD_TITLE}
-        </div>
-        <div ref={cardLineRef} className="card-line" />
-        <div ref={cardSubRef} className="card-sub">
-          {CARD_SUB}
-        </div>
-      </div>
-
       {/* chapter HUD */}
       <div
         className="absolute left-[4vw] z-10 font-mono text-[11px] tracking-[0.35em] text-amber-200/80"
-        style={{ bottom: "22px" }}
+        style={{ bottom: "56px" }}
       >
         <div
           className="transition-[opacity,transform] duration-500"
@@ -223,20 +184,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* replay */}
-      {stage === "end" && (
-        <button
-          onClick={replay}
-          className={`replay${endChromeVisible ? "" : " replay-hidden"}`}
-        >
-          <span className="text-base leading-none">↻</span> ПОВТОРИТЬ
-        </button>
-      )}
-
       {/* seekable film timeline with an explicit seconds readout */}
       <div
-        className="absolute inset-x-[4vw] bottom-[54px] z-20 flex items-center gap-4 transition-opacity duration-700"
-        style={{ opacity: endChromeVisible ? 1 : 0, pointerEvents: endChromeVisible ? "auto" : "none" }}
+        className="absolute inset-x-[3vw] bottom-[8px] z-20 flex items-center gap-3 transition-opacity duration-500"
+        style={{ opacity: controlsVisible ? 1 : 0, pointerEvents: controlsVisible ? "auto" : "none" }}
       >
         <button
           type="button"
@@ -268,6 +219,11 @@ export default function App() {
           }}
           className="h-5 min-w-0 flex-1 cursor-pointer accent-amber-300"
         />
+        {stage === "end" && (
+          <button type="button" onClick={replay} className="replay replay-inline">
+            <span className="text-base leading-none">↻</span> ПОВТОРИТЬ
+          </button>
+        )}
       </div>
       </div>
     </div>
