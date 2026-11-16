@@ -42,6 +42,27 @@ export default function App() {
   const [stage, setStage] = useState<Stage>("approach");
   const [chapter, setChapter] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [endChromeVisible, setEndChromeVisible] = useState(true);
+  const endChromeTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (endChromeTimer.current !== null) window.clearTimeout(endChromeTimer.current);
+    if (stage !== "end") {
+      setEndChromeVisible(true);
+      return;
+    }
+    endChromeTimer.current = window.setTimeout(() => setEndChromeVisible(false), 2600);
+    return () => {
+      if (endChromeTimer.current !== null) window.clearTimeout(endChromeTimer.current);
+    };
+  }, [stage]);
+
+  const revealEndChrome = () => {
+    if (stage !== "end") return;
+    setEndChromeVisible(true);
+    if (endChromeTimer.current !== null) window.clearTimeout(endChromeTimer.current);
+    endChromeTimer.current = window.setTimeout(() => setEndChromeVisible(false), 2600);
+  };
 
   const paint = useCallback((t: number) => {
     // ---- opening title card
@@ -144,7 +165,12 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell fixed inset-0 grid place-items-center overflow-hidden bg-black select-none" style={{ cursor: "default" }}>
+    <div
+      className="app-shell fixed inset-0 grid place-items-center overflow-hidden bg-black select-none"
+      style={{ cursor: "default" }}
+      onPointerMove={revealEndChrome}
+      onPointerDown={revealEndChrome}
+    >
       <div className="cinema-frame">
       <div ref={mountRef} className="absolute inset-0" />
 
@@ -199,13 +225,19 @@ export default function App() {
 
       {/* replay */}
       {stage === "end" && (
-        <button onClick={replay} className="replay">
+        <button
+          onClick={replay}
+          className={`replay${endChromeVisible ? "" : " replay-hidden"}`}
+        >
           <span className="text-base leading-none">↻</span> ПОВТОРИТЬ
         </button>
       )}
 
       {/* seekable film timeline with an explicit seconds readout */}
-      <div className="absolute inset-x-[4vw] bottom-[54px] z-20 flex items-center gap-4">
+      <div
+        className="absolute inset-x-[4vw] bottom-[54px] z-20 flex items-center gap-4 transition-opacity duration-700"
+        style={{ opacity: endChromeVisible ? 1 : 0, pointerEvents: endChromeVisible ? "auto" : "none" }}
+      >
         <button
           type="button"
           onClick={togglePlayback}

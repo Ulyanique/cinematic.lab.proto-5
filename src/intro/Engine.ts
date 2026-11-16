@@ -523,15 +523,15 @@ export class IntroEngine {
     logoTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     this.logoMaterial = new THREE.MeshBasicMaterial({
       map: logoTexture,
-      color: 0xffe1a0,
+      color: 0xffffff,
       transparent: true,
       opacity: 0,
       side: THREE.DoubleSide,
       depthWrite: false,
       toneMapped: false,
     });
-    this.logo = new THREE.Mesh(new THREE.PlaneGeometry(11.4, 12), this.logoMaterial);
-    this.logo.position.set(0, 5.8, 0);
+    this.logo = new THREE.Mesh(new THREE.PlaneGeometry(5.13, 5.4), this.logoMaterial);
+    this.logo.position.set(0, 8.5, 0);
     this.logo.renderOrder = 10;
     this.logo.frustumCulled = false;
     this.logo.visible = false;
@@ -888,7 +888,7 @@ export class IntroEngine {
     const logoScale = 0.92 + 0.08 * logoReveal;
     this.logo.scale.set(logoScale, logoScale, 1);
     this.logo.rotation.y = Math.sin(t * 0.4) * 0.015;
-    const haloI = post ? 0.22 * smoothstep(0.4, 2.4, tl) + 0.9 * Math.exp(-Math.pow((tl - 4.05) / 0.4, 2)) : 0;
+    const haloI = post ? 0.13 * smoothstep(0.4, 2.4, tl) + 0.65 * Math.exp(-Math.pow((tl - 4.05) / 0.4, 2)) : 0;
     this.halo.visible = post;
     this.billboard(this.halo, 20 + Math.sin(t * 0.6) * 0.6);
     this.halo.position.set(0, 5.8, 0).addScaledVector(this.tmpV.copy(cam.position).sub(BLAST_POS).normalize(), -2.5);
