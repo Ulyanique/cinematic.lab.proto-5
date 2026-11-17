@@ -243,7 +243,7 @@ export class IntroEngine {
       this.videoReady.push(new Promise<void>((resolve, reject) => {
         const timer = window.setTimeout(() => reject(new Error(`Тайм-аут загрузки видео ${i + 1}`)), 30000);
         video.addEventListener("loadeddata", () => { window.clearTimeout(timer); resolve(); }, { once: true });
-        video.addEventListener("error", () => { window.clearTimeout(timer); reject(new Error(`Не удалось загрузить video/${String(i + 1).padStart(2, "0")}.mp4`)); }, { once: true });
+        video.addEventListener("error", () => { window.clearTimeout(timer); reject(new Error(`Не удалось загрузить или декодировать video/${String(i + 1).padStart(2, "0")}.mp4. Проверьте, что файл доступен на сервере и браузер поддерживает его формат.`)); }, { once: true });
         video.load();
       }));
       // Preview can still run without media; export checks all errors explicitly.

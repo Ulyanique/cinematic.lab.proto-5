@@ -19,12 +19,25 @@ function aborted(signal: AbortSignal) {
   if (signal.aborted) throw new DOMException('Экспорт отменён', 'AbortError');
 }
 
-function waitFor<T>(promise: Promise<T>, signal: AbortSignal, ms: number): Promise<T> {
+/** Errors raised in the render iframe belong to a different JavaScript realm,
+ * so `instanceof Error` is false even for real Error and DOMException objects. */
+export function describeExportError(error: unknown): string {
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const message = 'message' in error ? error.message : undefined;
+    const name = 'name' in error ? error.name : undefined;
+    if (typeof message === 'string' && message.trim()) return message;
+    if (typeof name === 'string' && name.trim()) return `Ошибка экспорта: ${name}.`;
+  }
+  return 'Не удалось создать MP4. Проверьте поддержку WebGL, WebCodecs и доступность исходных видео; подробности — в консоли браузера.';
+}
+
+function waitFor<T>(promise: Promise<T>, signal: AbortSignal, ms: number, stage: string): Promise<T> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new DOMException('Экспорт отменён', 'AbortError'));
     const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', onAbort); };
     const onAbort = () => { cleanup(); reject(new DOMException('Экспорт отменён', 'AbortError')); };
-    const timer = window.setTimeout(() => { cleanup(); reject(new Error('Превышено время ожидания подготовки экспорта.')); }, ms);
+    const timer = window.setTimeout(() => { cleanup(); reject(new Error(`Превышено время ожидания: ${stage}. Попробуйте закрыть другие вкладки и повторить экспорт.`)); }, ms);
     signal.addEventListener('abort', onAbort, { once: true });
     promise.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
   });
@@ -37,7 +50,7 @@ export async function exportLocally({ signal, onProgress, settings, width = WIDT
   if (!window.isSecureContext || typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') {
     throw new Error('Нужен HTTPS и браузер с WebCodecs. Попробуйте актуальный Chrome или Edge.');
   }
-  if (!await canEncodeVideo('avc', { width, height, frameRate: EXPORT_FPS, quality: QUALITY_HIGH, latencyMode: 'quality' })) {
+  if (!await waitFor(canEncodeVideo('avc', { width, height, frameRate: EXPORT_FPS, quality: QUALITY_HIGH, latencyMode: 'quality' }), signal, 30000, 'проверка кодировщика H.264')) {
     throw new Error('Браузер не поддерживает кодирование H.264 в MP4. Попробуйте актуальный Chrome или Edge.');
   }
   aborted(signal);
@@ -59,21 +72,25 @@ export async function exportLocally({ signal, onProgress, settings, width = WIDT
   let output: Output | undefined;
   let complete = false;
   try {
-    await waitFor(loaded, signal, 60000);
-    const api = frame.contentWindow?.cinematicExport;
+    await waitFor(loaded, signal, 60000, 'загрузка страницы сцены');
+    const readApi = (): ExportApi | undefined => {
+      try { return frame.contentWindow?.cinematicExport; }
+      catch {
+        throw new Error('Браузер заблокировал доступ к сцене экспорта во встроенном окне. Откройте предпросмотр в отдельной вкладке и повторите.');
+      }
+    };
     // React mounts asynchronously after iframe load.
     const getApi = async (): Promise<ExportApi> => {
-      if (api) return api;
       for (let i = 0; i < 300; i++) {
         aborted(signal);
-        const value = frame.contentWindow?.cinematicExport;
+        const value = readApi();
         if (value) return value;
         await new Promise(resolve => setTimeout(resolve, 100));
       }
       throw new Error('Сцена экспорта не запустилась.');
     };
-    const scene = await waitFor(getApi(), signal, 35000);
-    await waitFor(scene.ready, signal, 90000);
+    const scene = await waitFor(getApi(), signal, 35000, 'запуск сцены');
+    await waitFor(scene.ready, signal, 90000, 'загрузка видео и сцены');
     const total = Math.ceil(scene.duration * EXPORT_FPS);
     if (!Number.isFinite(scene.duration) || total <= 0) throw new Error('Некорректная длительность ролика.');
     const canvas = document.createElement('canvas');
@@ -85,17 +102,17 @@ export async function exportLocally({ signal, onProgress, settings, width = WIDT
     let packets = 0;
     const source = new CanvasSource(canvas, { codec: 'avc', quality: QUALITY_HIGH, latencyMode: 'quality', onEncodedPacket: () => { packets++; } });
     output.addVideoTrack(source, { frameRate: EXPORT_FPS });
-    await output.start();
+    await waitFor(output.start(), signal, 45000, 'запуск кодировщика H.264');
     for (let n = 0; n < total; n++) {
       aborted(signal);
-      await waitFor(scene.renderFrame(n, EXPORT_FPS), signal, 45000);
+      await waitFor(scene.renderFrame(n, EXPORT_FPS), signal, 45000, `рендер кадра ${n + 1} из ${total}`);
       scene.drawFrame(ctx);
-      await waitFor(source.add(n / EXPORT_FPS, 1 / EXPORT_FPS), signal, 45000);
+      await waitFor(source.add(n / EXPORT_FPS, 1 / EXPORT_FPS), signal, 45000, `кодирование кадра ${n + 1} из ${total}`);
       onProgress(n + 1, total, 'rendering');
     }
     aborted(signal);
     onProgress(total, total, 'finalizing');
-    await waitFor(output.finalize(), signal, 120000);
+    await waitFor(output.finalize(), signal, 120000, 'сборка MP4');
     if (packets !== total) throw new Error(`Кодировщик записал ${packets} кадров из ${total}.`);
     if (!target.buffer?.byteLength) throw new Error('Кодировщик вернул пустой файл.');
     complete = true;

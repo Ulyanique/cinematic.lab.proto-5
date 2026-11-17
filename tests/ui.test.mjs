@@ -68,6 +68,16 @@ test('compact settings can be moved and the completed export opens, saves, close
     await page.keyboard.press('Escape');
     assert.equal(await viewer.count(), 0);
     assert.equal(await page.getByRole('link', { name: /СКАЧАТЬ MP4/ }).count(), 1);
+    // A real Error from the render iframe is from another realm. Its useful message
+    // must not be replaced by the generic fallback in the parent UI.
+    await page.unrouteAll();
+    await page.route('**/ui-harness?export=1&pr=1', route => route.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: `<script>window.cinematicExport={ready:Promise.reject(new Error('Не удалось загрузить video/01.mp4')),duration:.1}</script>`}));
+    await page.getByRole('button', { name: 'СОЗДАТЬ ЗАНОВО' }).click();
+    await page.locator('.export-error').waitFor();
+    assert.match(await page.locator('.export-error').innerText(), /Не удалось загрузить video\/01\.mp4/);
+    assert.equal(await viewer.count(), 0);
+    assert.equal(await page.getByRole('link', { name: /СКАЧАТЬ MP4/ }).count(), 0);
+
   } finally {
     await browser?.close();
     await server.close();

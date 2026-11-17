@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ExportViewer } from './ExportViewer';
-import { exportLocally } from './intro/localExport';
+import { describeExportError, exportLocally } from './intro/localExport';
 import type { FilmSettings } from './intro/settings';
 
 type State = 'idle' | 'preparing' | 'rendering' | 'finalizing' | 'done' | 'cancelled' | 'error';
@@ -38,7 +38,7 @@ export function ExportPanel({ onStart, settings }: { onStart: () => void; settin
       setViewerOpen(true);
     } catch (err) {
       if (abort.signal.aborted) setState('cancelled');
-      else { setError(err instanceof Error ? err.message : 'Не удалось создать MP4.'); setState('error'); }
+      else { console.error('Ошибка экспорта MP4:', err); setError(describeExportError(err)); setState('error'); }
     } finally { controller.current = null; }
   };
   const percent = progress.total ? Math.round(progress.frame / progress.total * 100) : 0;
