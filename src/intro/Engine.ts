@@ -9,6 +9,7 @@ import { clamp, lerp, mulberry32, smoothstep, terrainHeight } from "./math";
 import * as S from "./shaders";
 import { LogoDust, LOGO_H, LOGO_W } from "./logoDust";
 import { logoExit } from "./finalExit";
+import { createAntialiasPass, resizeAntialias } from "./antialias";
 import { DEFAULT_SETTINGS, type FilmSettings } from "./settings";
 import logoUrl from "../assets/logo.svg?inline";
 import {
@@ -53,6 +54,7 @@ export class IntroEngine {
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
   private post: ShaderPass;
+  private antialias: ShaderPass;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(55, 1, 0.3, 1400);
   private cam: CamState = { pos: new THREE.Vector3(), target: new THREE.Vector3(), fov: 50, roll: 0 };
@@ -673,6 +675,12 @@ export class IntroEngine {
     });
     this.composer.addPass(this.post);
     this.composer.addPass(new OutputPass());
+    // FXAA operates on the output-colour image, smoothing geometry without relying
+    // on multisampled half-float framebuffer support. It is also used for export.
+    this.antialias = createAntialiasPass();
+    this.antialias.enabled = this.settings.antialias;
+    resizeAntialias(this.antialias, w, h, this.pixelRatio);
+    this.composer.addPass(this.antialias);
 
     window.addEventListener("resize", this.onResize);
     this.renderer.domElement.addEventListener("webglcontextlost", this.onContextLost);
@@ -725,6 +733,7 @@ export class IntroEngine {
 
   setSettings(settings: FilmSettings) {
     this.settings = settings;
+    this.antialias.enabled = settings.antialias;
     this.apply(this.time);
     this.syncVideos(this.time);
     this.composer.render();
@@ -809,6 +818,7 @@ export class IntroEngine {
     this.renderer.setSize(w, h);
     this.composer.setPixelRatio(this.pixelRatio);
     this.composer.setSize(w, h);
+    resizeAntialias(this.antialias, w, h, this.pixelRatio);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.post.uniforms.uAspect.value = w / h;
@@ -1190,6 +1200,7 @@ export class IntroEngine {
     });
     for (const video of this.videos) { video.pause(); video.removeAttribute("src"); video.load(); }
     this.logoMaterial.map?.dispose();
+    this.antialias.dispose();
     this.composer.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();

@@ -108,13 +108,14 @@ test('local export encodes every frame at 30 fps without a server render job', {
       const { exportLocally } = await import('/src/intro/localExport.ts');
       const progress = [];
       const { DEFAULT_SETTINGS } = await import('/src/intro/settings.ts');
-      const settings = { ...DEFAULT_SETTINGS, title: 'ТЕСТ', videoOrder: [2,1,0,3,4,5,6,7,8,9] };
+      const settings = { ...DEFAULT_SETTINGS, antialias: false, title: 'ТЕСТ', videoOrder: [2,1,0,3,4,5,6,7,8,9] };
       const blob = await exportLocally({ signal: new AbortController().signal, settings, width: 320, height: 180, onProgress: (n, total, phase) => progress.push([n, total, phase]) });
       return { bytes: Array.from(new Uint8Array(await blob.arrayBuffer())), frames: window.__frames, snapshot: JSON.parse(window.__snapshot), progress, iframes: document.querySelectorAll('iframe').length };
     });
     assert.deepEqual(result.frames, [[0, 30], [1, 30], [2, 30]]);
     assert.equal(result.iframes, 0);
     assert.equal(result.snapshot.title, 'ТЕСТ');
+    assert.equal(result.snapshot.antialias, false);
     assert.deepEqual(result.snapshot.videoOrder, [2,1,0,3,4,5,6,7,8,9]);
     assert.equal(serverJobs, 0);
     assert.deepEqual(result.progress.at(-1), [3, 3, 'finalizing']);

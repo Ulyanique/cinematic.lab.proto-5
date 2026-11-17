@@ -5,6 +5,7 @@ export interface FilmSettings {
   logoScale: number; logoOpacity: number; showTitle: boolean; showSubtitle: boolean; showLogo: boolean;
   revealSpeed: number; exitMotion: number;
   ringsEnabled: boolean; ringColor: string; ringSize: number; ringOpacity: number; ringSpeed: number;
+  antialias: boolean;
   exposure: number; bloom: number; dust: number; beams: number; blast: number; sigil: number; sky: number; rays: number; grain: number; vignette: number;
   hue: number; saturation: number; cameraFov: number; cameraDrift: number;
   videoBrightness: number; videoOrder: number[];
@@ -16,6 +17,7 @@ export const DEFAULT_SETTINGS: FilmSettings = {
   logoScale: 1, logoOpacity: 1, showTitle: true, showSubtitle: true, showLogo: true,
   revealSpeed: 1, exitMotion: 1,
   ringsEnabled: true, ringColor: '#edc67c', ringSize: 1, ringOpacity: 1, ringSpeed: 1,
+  antialias: true,
   exposure: 1, bloom: 1, dust: 1, beams: 1, blast: 1, sigil: 1, sky: 1, rays: 1, grain: 1, vignette: 1,
   hue: 0, saturation: 1, cameraFov: 1, cameraDrift: 1, videoBrightness: 1,
   videoOrder: [0,1,2,3,4,5,6,7,8,9],
@@ -40,7 +42,7 @@ export function normalizeSettings(value: unknown): FilmSettings {
       if (v === 'Prata' || v === 'Forum' || v === 'Inter') result[key] = v;
     } else if (key === 'titleLight' || key === 'titleMid' || key === 'titleGold' || key === 'titleDark' || key === 'subtitleColor' || key === 'ringColor') {
       if (typeof v === 'string' && /^#[\da-f]{6}$/i.test(v)) result[key] = v;
-    } else if (key === 'showTitle' || key === 'showSubtitle' || key === 'showLogo' || key === 'ringsEnabled') {
+    } else if (key === 'showTitle' || key === 'showSubtitle' || key === 'showLogo' || key === 'ringsEnabled' || key === 'antialias') {
       if (typeof v === 'boolean') result[key] = v;
     } else if (ranges[key] && typeof v === 'number' && Number.isFinite(v)) {
       const [min, max] = ranges[key]!;

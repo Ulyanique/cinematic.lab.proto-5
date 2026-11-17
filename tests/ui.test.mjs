@@ -40,6 +40,11 @@ test('compact settings can be moved and the completed export opens, saves, close
     await page.getByText('Финальная композиция').click();
     await page.getByRole('textbox', { name: 'Название' }).fill('НОВЫЙ ТЕКСТ');
     assert.equal(await page.getByRole('textbox', { name: 'Название' }).inputValue(), 'НОВЫЙ ТЕКСТ');
+    await page.getByText('Свет и эффекты').click();
+    const antialias = page.getByRole('checkbox', { name: 'Сглаживание краёв (FXAA)' });
+    assert.equal(await antialias.isChecked(), true);
+    await antialias.uncheck();
+    assert.equal(await antialias.isChecked(), false);
     await page.getByRole('button', { name: 'Настройки композиции' }).click();
 
     await page.route('**/ui-harness?export=1&pr=1', route => route.fulfill({status: 200, contentType: 'text/html', body: fixture}));
