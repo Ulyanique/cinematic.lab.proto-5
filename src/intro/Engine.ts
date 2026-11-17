@@ -7,8 +7,9 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { buildHero, buildScenery, buildTerrain } from "./geometry";
 import { clamp, lerp, mulberry32, smoothstep, terrainHeight } from "./math";
 import * as S from "./shaders";
-import { makePlaceholderTexture } from "./textures";
 import { LogoDust, LOGO_H, LOGO_W } from "./logoDust";
+import { logoExit } from "./finalExit";
+import { DEFAULT_SETTINGS, type FilmSettings } from "./settings";
 import logoUrl from "../assets/logo.svg?inline";
 import {
   BLAST_POS,
@@ -46,6 +47,7 @@ const additive = (m: THREE.ShaderMaterial) => {
 };
 
 export class IntroEngine {
+  private settings: FilmSettings;
   private container: HTMLElement;
   private renderer: THREE.WebGLRenderer;
   private composer: EffectComposer;
@@ -113,7 +115,11 @@ export class IntroEngine {
   private adaptive = true;
   private frameEma = 1 / 60;
   private slowFrames = 0;
-  private pointer = { x: 0, y: 0, sx: 0, sy: 0 };
+  private videos: HTMLVideoElement[] = [];
+  private videoTextures: THREE.VideoTexture[] = [];
+  private videoReady: Promise<void>[] = [];
+  private exportMode = new URLSearchParams(window.location.search).get("export") === "1";
+  readonly ready: Promise<void>;
   private logoShine = { value: -1 };
   private disposed = false;
   private paused = false;
@@ -121,14 +127,15 @@ export class IntroEngine {
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector2();
 
-  constructor(container: HTMLElement, events: IntroEvents = {}, fixedT: number | null = null) {
+  constructor(container: HTMLElement, events: IntroEvents = {}, fixedT: number | null = null, settings: FilmSettings = DEFAULT_SETTINGS) {
+    this.settings = settings;
     this.container = container;
     this.events = events;
     this.fixedT = fixedT;
     const w = container.clientWidth || window.innerWidth;
     const h = container.clientHeight || window.innerHeight;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", preserveDrawingBuffer: this.exportMode });
     // Supersample for crisp facet edges (the scene has no MSAA), then let the adaptive governor
     // step the resolution down if the GPU cannot hold the frame rate.
     const prParam = parseFloat(new URLSearchParams(window.location.search).get("pr") ?? "");
@@ -136,7 +143,7 @@ export class IntroEngine {
     const target = Number.isFinite(prParam) && prParam > 0 ? prParam : Math.min(Math.max(dpr, 1.5), 2);
     this.prLevels = [target, 1.5, 1.25, 1, 0.85].filter((v, i, a) => v <= target + 1e-6 && a.indexOf(v) === i);
     this.pixelRatio = this.prLevels[0];
-    this.adaptive = !Number.isFinite(prParam) || prParam <= 0;
+    this.adaptive = !this.exportMode && (!Number.isFinite(prParam) || prParam <= 0);
     renderer.setPixelRatio(this.pixelRatio);
     renderer.setSize(w, h);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -218,6 +225,29 @@ export class IntroEngine {
       body.frustumCulled = false;
       group.add(body);
 
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.src = `${import.meta.env.BASE_URL}video/${String(i + 1).padStart(2, "0")}.mp4`;
+      this.videos.push(video);
+      const texture = new THREE.VideoTexture(video);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      this.videoTextures.push(texture);
+      video.addEventListener("seeked", () => {
+        if (!this.exportMode && this.paused && !this.disposed) {
+          texture.needsUpdate = true;
+          this.composer.render();
+        }
+      });
+      this.videoReady.push(new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(() => reject(new Error(`Тайм-аут загрузки видео ${i + 1}`)), 30000);
+        video.addEventListener("loadeddata", () => { window.clearTimeout(timer); resolve(); }, { once: true });
+        video.addEventListener("error", () => { window.clearTimeout(timer); reject(new Error(`Не удалось загрузить video/${String(i + 1).padStart(2, "0")}.mp4`)); }, { once: true });
+        video.load();
+      }));
+      // Preview can still run without media; export checks all errors explicitly.
+      void this.videoReady[i].catch(() => {});
       const screenMat = new THREE.ShaderMaterial({
         vertexShader: S.SCREEN_VERT,
         fragmentShader: S.SCREEN_FRAG,
@@ -232,10 +262,12 @@ export class IntroEngine {
           uFogColor: this.U.uFogColor,
           uFogDensity: this.U.uFogDensity,
           uDim: this.U.uDim,
-          uTex: { value: makePlaceholderTexture(i, HERO_COUNT, data.aspect) },
+          uTex: { value: texture },
           uOn: { value: 0 },
           uFocus: { value: 0 },
           uAspect: { value: data.aspect },
+          uMediaAspect: { value: 16 / 9 },
+          uVideoBrightness: { value: 1 },
           uSeed: { value: i * 0.137 },
         },
       });
@@ -358,6 +390,7 @@ export class IntroEngine {
           uniforms: {
             uT: { value: -1 },
             uImplode: { value: 0 },
+            uPower: { value: 1 },
             uCenter: { value: BLAST_POS.clone() },
             uPx: { value: this.pixelRatio },
             uTime: this.U.uTime,
@@ -529,7 +562,10 @@ export class IntroEngine {
     this.scene.add(this.ring);
 
     // ---------------------------------------------------------------- the compass logo
-    const logoTexture = new THREE.TextureLoader().load(logoUrl);
+    let resolveLogo!: () => void;
+    let rejectLogo!: (error: Error) => void;
+    const logoReady = new Promise<void>((resolve, reject) => { resolveLogo = resolve; rejectLogo = reject; });
+    const logoTexture = new THREE.TextureLoader().load(logoUrl, () => resolveLogo(), undefined, () => rejectLogo(new Error("Не удалось загрузить логотип")));
     logoTexture.colorSpace = THREE.SRGBColorSpace;
     logoTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
     this.logoMaterial = new THREE.MeshBasicMaterial({
@@ -639,14 +675,18 @@ export class IntroEngine {
     this.composer.addPass(new OutputPass());
 
     window.addEventListener("resize", this.onResize);
-    window.addEventListener("pointermove", this.onPointer);
     this.renderer.domElement.addEventListener("webglcontextlost", this.onContextLost);
     this.renderer.domElement.addEventListener("webglcontextrestored", this.onContextRestored);
     document.addEventListener("visibilitychange", this.onVisibility);
     this.warmUp();
+    this.ready = Promise.all([logoReady, this.logoDust.readyPromise, ...this.videoReady]).then(() => {
+      if (this.disposed) throw new Error("Движок остановлен");
+      this.events.onReady?.();
+    });
+    void this.ready.catch((error) => { if (!this.disposed) console.warn("Не все ресурсы загружены:", error); });
     this.lastTs = performance.now();
-    this.raf = requestAnimationFrame(this.loop);
-    this.events.onReady?.();
+    if (this.exportMode) this.paused = true;
+    else this.raf = requestAnimationFrame(this.loop);
   }
 
   /** current intro time in seconds (accumulated per frame, so hitches never make the film jump) */
@@ -673,6 +713,7 @@ export class IntroEngine {
     if (this.paused) return;
     this.paused = true;
     cancelAnimationFrame(this.raf);
+    for (const video of this.videos) video.pause();
   }
 
   resume() {
@@ -682,6 +723,13 @@ export class IntroEngine {
     this.raf = requestAnimationFrame(this.loop);
   }
 
+  setSettings(settings: FilmSettings) {
+    this.settings = settings;
+    this.apply(this.time);
+    this.syncVideos(this.time);
+    this.composer.render();
+  }
+
   /** Seek the film timeline in seconds and resume playback from the selected point. */
   seek(seconds: number) {
     this.clock = clamp(seconds, 0, TL.end);
@@ -689,6 +737,8 @@ export class IntroEngine {
     this.lastStage = null;
     this.lastChapter = -1;
     this.apply(this.clock);
+    this.syncVideos(this.clock);
+    this.composer.render();
   }
 
   /**
@@ -730,10 +780,6 @@ export class IntroEngine {
     if (!this.paused && !document.hidden) this.raf = requestAnimationFrame(this.loop);
   };
 
-  private onPointer = (e: PointerEvent) => {
-    this.pointer.x = (e.clientX / Math.max(window.innerWidth, 1)) * 2 - 1;
-    this.pointer.y = (e.clientY / Math.max(window.innerHeight, 1)) * 2 - 1;
-  };
 
   /** Apply a new internal resolution (also refreshes the point-sprite scale uniforms). */
   private setResolution(pr: number) {
@@ -776,10 +822,7 @@ export class IntroEngine {
     if (!(dt > 0)) dt = 1 / 60;
     dt = Math.min(dt, 0.25);
     if (this.fixedT === null) this.clock = Math.min(TL.end, this.clock + dt);
-    // pointer parallax is eased on the render clock, independent of the film clock
-    const k = 1 - Math.exp(-dt * 2.4);
-    this.pointer.sx += (this.pointer.x - this.pointer.sx) * k;
-    this.pointer.sy += (this.pointer.y - this.pointer.sy) * k;
+    this.syncVideos(this.time);
     this.governor(dt);
     this.apply(this.time);
     this.composer.render();
@@ -788,6 +831,51 @@ export class IntroEngine {
     // Keep the composer framebuffer at a stable 1x resolution. Resizing multiple
     // post-processing targets dynamically during playback can flash an empty frame.
   };
+
+  /** Preview follows the film clock; media is silent and holds its last frame. */
+  private mediaTime(i: number, t: number) {
+    const duration = this.videos[i].duration;
+    const slot = this.settings.videoOrder.indexOf(i);
+    return Math.max(0, Math.min(Math.max(0, duration - 0.05), t - (visitTime(slot) - 0.95)));
+  }
+
+  private syncVideos(t: number) {
+    if (this.exportMode) return;
+    this.videos.forEach((video, i) => {
+      if (video.readyState < 2 || !Number.isFinite(video.duration)) return;
+      const local = this.mediaTime(i, t);
+      const active = !this.paused && this.fixedT === null && t >= visitTime(this.settings.videoOrder.indexOf(i)) - 0.95 && local < video.duration - 0.06 && t < TL.explode;
+      if (Math.abs(video.currentTime - local) > 0.25) video.currentTime = local;
+      if (active && video.paused) void video.play().catch(() => {});
+      if (!active && !video.paused) video.pause();
+    });
+  }
+
+  get canvas() { return this.renderer.domElement; }
+
+  /** Render one requested time after decoding all source video frames. */
+  async renderFrame(t: number) {
+    if (!this.exportMode) throw new Error("renderFrame доступен только в режиме export=1");
+    if (!Number.isFinite(t) || t < 0 || t >= TL.end) throw new Error("Время кадра вне диапазона фильма");
+    await this.ready;
+    if (this.renderer.getContext().isContextLost()) throw new Error("Контекст WebGL потерян; экспорт остановлен.");
+    await Promise.all(this.videos.map((video, i) => new Promise<void>((resolve, reject) => {
+      const target = this.mediaTime(i, t);
+      if (Math.abs(video.currentTime - target) < 0.00001 && video.readyState >= 2) { resolve(); return; }
+      const timeout = window.setTimeout(() => { cleanup(); reject(new Error(`Тайм-аут перемотки видео ${i + 1}`)); }, 15000);
+      const cleanup = () => { clearTimeout(timeout); video.removeEventListener("seeked", done); video.removeEventListener("error", failed); };
+      const done = () => { cleanup(); resolve(); };
+      const failed = () => { cleanup(); reject(new Error(`Ошибка декодирования видео ${i + 1}`)); };
+      video.addEventListener("seeked", done, { once: true });
+      video.addEventListener("error", failed, { once: true });
+      video.currentTime = target;
+    })));
+    this.videoTextures.forEach(texture => { texture.needsUpdate = true; });
+    this.fixedT = t;
+    this.apply(t);
+    this.composer.render();
+    if (this.renderer.getContext().isContextLost()) throw new Error("Контекст WebGL потерян; экспорт остановлен.");
+  }
 
   private billboard(m: THREE.Mesh, size: number) {
     m.lookAt(this.camera.position);
@@ -884,7 +972,7 @@ export class IntroEngine {
 
     // ------------------------------------------------ camera
     // a slow, soft handheld drift only – no high-frequency shake anywhere
-    sampleCamera(t, this.cam);
+    sampleCamera(t, this.cam, this.settings.cameraDrift);
     if (this.debugLook === "logo") {
       // QA helper: close-up on the logo (?look=logo)
       this.cam.pos.set(0, 6.4, 12.5);
@@ -894,17 +982,13 @@ export class IntroEngine {
     }
     const cam = this.camera;
     cam.position.copy(this.cam.pos);
-    cam.position.x += Math.sin(t * 0.9) * 0.1;
-    cam.position.y += Math.sin(t * 1.3 + 2) * 0.08;
-    cam.position.z += Math.sin(t * 0.7 + 1) * 0.1;
+    cam.position.x += Math.sin(t * 0.9) * 0.1 * this.settings.cameraDrift;
+    cam.position.y += Math.sin(t * 1.3 + 2) * 0.08 * this.settings.cameraDrift;
+    cam.position.z += Math.sin(t * 0.7 + 1) * 0.1 * this.settings.cameraDrift;
     cam.up.set(0, 1, 0);
     cam.lookAt(this.cam.target);
     cam.rotateZ(this.cam.roll);
-    // gentle pointer parallax: a few hundredths of a radian is enough to make the world feel solid
-    const parallax = t >= TL.explode ? 1.25 : 1;
-    cam.rotateY(-this.pointer.sx * 0.032 * parallax);
-    cam.rotateX(-this.pointer.sy * 0.02 * parallax);
-    cam.fov = this.cam.fov;
+    cam.fov = this.cam.fov * this.settings.cameraFov;
     cam.updateProjectionMatrix();
     this.updateComet(t);
     // fades that must fully decay after the blast (the raw implode factor stays at 1 forever)
@@ -918,17 +1002,19 @@ export class IntroEngine {
     U.uFogDensity.value = lerp(0.0092, 0.0068, smoothstep(0, 9, t));
     const blastShade = post ? 1 - 0.68 * Math.exp(-tl * 0.9) : 1;
     U.uDim.value = (post ? lerp(1, 0.025, smoothstep(1.5, 5, tl)) : 1) * blastShade;
-    U.uBlastLight.value = post ? 1.6 * Math.exp(-tl * 3.4) + 0.32 * Math.exp(-tl * 0.8) + 0.1 : 0.9 * k2;
+    U.uBlastLight.value = (post ? 1.6 * Math.exp(-tl * 3.4) + 0.32 * Math.exp(-tl * 0.8) + 0.1 : 0.9 * k2) * this.settings.blast;
 
     this.sky.position.copy(cam.position);
     this.skyMat.uniforms.uGlow.value = k2 * 0.25 + (post ? 0.38 * Math.exp(-tl * 1.5) : 0);
-    this.skyMat.uniforms.uDim.value = lerp(1, 0.06, smoothstep(TL.logoText, TL.end, t)) * blastShade;
+    this.skyMat.uniforms.uDim.value = lerp(1, 0.06, smoothstep(TL.logoText, TL.finalSettle, t)) * blastShade * this.settings.sky;
 
     // ------------------------------------------------ monoliths
     let chapter = 0;
     let bestFocus = 0.3;
     for (let i = 0; i < HERO_COUNT; i++) {
       const h = this.heroes[i];
+      h.screenMat.uniforms.uTex.value = this.videoTextures[this.settings.videoOrder[i]];
+      h.screenMat.uniforms.uVideoBrightness.value = this.settings.videoBrightness;
       const rise = clamp((t - riseStart(i)) / TL.riseDur);
       const focus = Math.exp(-Math.pow((t - visitTime(i)) / 0.95, 2));
       if (focus > bestFocus && !post) {
@@ -945,21 +1031,21 @@ export class IntroEngine {
       h.screenMat.uniforms.uFocus.value = fAll;
       const eruption = Math.sin(clamp(rise * 1.15) * Math.PI);
       const beamI = eruption * 0.72 + (rise >= 1 ? 0.10 : 0) * rise + focus * 0.10;
-      h.beamMat.uniforms.uI.value = beamI;
-      h.glowMat.uniforms.uI.value = eruption * 0.65 + 0.18 * rise + focus * 0.12;
+      h.beamMat.uniforms.uI.value = beamI * this.settings.beams;
+      h.glowMat.uniforms.uI.value = (eruption * 0.65 + 0.18 * rise + focus * 0.12) * this.settings.beams;
     }
     this.sceneryMat.uniforms.uGlow.value = 0.85 + k2 * 0.8 + (post ? 1.2 * expl : 0);
 
     // ------------------------------------------------ arena sigil
     this.sigilMat.uniforms.uDraw.value = clamp((t - 12.5) / 13.5);
-    const sigilFinalFade = 1 - 0.92 * smoothstep(TL.logoText, TL.end, t);
+    const sigilFinalFade = 1 - 0.92 * smoothstep(TL.logoText, TL.finalSettle, t);
     this.sigilMat.uniforms.uI.value =
       (0.35 + 0.45 * smoothstep(12, 20, t) + k2 * 1.0) *
       (post ? 0.6 + 2.2 * Math.exp(-tl * 1.4) : 1) *
-      sigilFinalFade;
+      sigilFinalFade * this.settings.sigil;
 
     // ------------------------------------------------ dust
-    this.dustMat.uniforms.uAlpha.value = 0.55 + 0.5 * smoothstep(0, 4, t);
+    this.dustMat.uniforms.uAlpha.value = (0.55 + 0.5 * smoothstep(0, 4, t)) * this.settings.dust;
 
     // ------------------------------------------------ singularity & explosion
     const pulseK = Math.sin(t * (4 + kImp * 9));
@@ -991,29 +1077,38 @@ export class IntroEngine {
       this.ringMat.uniforms.uW.value = 1.4 + tl * 1.8;
       this.ringMat.uniforms.uI.value = 1.8 * Math.exp(-tl * 0.8);
     }
+    this.coreMat.uniforms.uI.value *= this.settings.blast;
+    this.flareMat.uniforms.uI.value *= this.settings.blast;
+    this.shellMat.uniforms.uI.value *= this.settings.blast;
+    this.ringMat.uniforms.uI.value *= this.settings.blast;
+    this.blastMat.uniforms.uPower.value = this.settings.blast;
     this.blastMat.uniforms.uT.value = post ? tl : -1;
     this.blastMat.uniforms.uImplode.value = kImp;
 
     // ------------------------------------------------ final SVG emblem: reveal it as a clean, front-facing vector mark
     // the solid emblem crossfades in only once most sparks have landed on it
     const logoReveal = post ? smoothstep(1.5, 3.3, tl) : 0;
-    this.logo.visible = logoReveal > 0.001;
-    this.logoMaterial.opacity = 0.96 * logoReveal;
-    this.logoDepthMat.opacity = logoReveal;
+    const exit = logoExit(t);
+    const logoVisible = this.settings.showLogo ? this.settings.logoOpacity : 0;
+    this.logo.visible = logoReveal * (1 - exit) * logoVisible > 0.001;
+    this.logoMaterial.opacity = 0.96 * logoReveal * (1 - exit) * logoVisible;
+    this.logoDepthMat.opacity = logoReveal * (1 - exit) * logoVisible;
     const buf = this.renderer.getDrawingBufferSize(this.tmpV2);
-    this.logoDust.update(post ? tl : -1, buf.y, post ? 1 - 0.5 * smoothstep(2.8, 4.6, tl) : 1);
+    this.logoDust.update(post ? tl : -1, buf.y, post ? (1 - 0.5 * smoothstep(2.8, 4.6, tl)) * (1 - exit) * logoVisible : 1);
     // first sheen as the emblem materialises, then a slow recurring glint
     const sh = tl - 6.0;
     const cycle = sh > 0 ? (sh % 7.5) / 2.2 : 0;
     const first = clamp((tl - 1.1) / 2.2);
     this.logoShine.value = post ? (sh > 0 ? -0.4 + cycle * 2.1 : -0.4 + first * 2.1) : -1;
-    const logoScale = 0.92 + 0.08 * logoReveal;
+    const logoScale = (0.92 + 0.08 * logoReveal) * (1 - Math.min(.8, 0.35 * this.settings.exitMotion) * exit) * this.settings.logoScale;
     this.logo.scale.set(logoScale, logoScale, 1);
     // a slow pendulum turn lets the thickness and the bevel glint (strongest right after the reveal)
     const swing = post ? smoothstep(1.5, 5, tl) : 0;
-    this.logo.rotation.y = Math.sin(t * 0.55) * 0.13 * swing - this.pointer.sx * 0.1 * swing;
-    this.logo.rotation.x = Math.sin(t * 0.38 + 1.0) * 0.025 * swing + this.pointer.sy * 0.05 * swing;
+    this.logo.rotation.y = Math.sin(t * 0.55) * 0.13 * swing;
+    this.logo.rotation.x = Math.sin(t * 0.38 + 1.0) * 0.025 * swing;
     this.logo.position.y = 7.35 + Math.sin(t * 0.8) * 0.06 * swing;
+    this.logoDust.material.uniforms.uLogo.value.copy(this.logo.position);
+    this.logoDust.material.uniforms.uLogoScale.value = logoScale;
     const haloI = post ? 0.13 * smoothstep(0.4, 2.4, tl) + 0.65 * Math.exp(-Math.pow((tl - 4.05) / 0.4, 2)) : 0;
     this.halo.visible = post;
     this.billboard(this.halo, 20 + Math.sin(t * 0.6) * 0.6);
@@ -1022,7 +1117,8 @@ export class IntroEngine {
     this.haloMat.uniforms.uTime.value = t;
 
     // ------------------------------------------------ post stack
-    this.bloom.strength = 0.42 + 0.28 * kImp + (post ? 0.18 * Math.exp(-tl * 2.6) : 0);
+    this.renderer.toneMappingExposure = 0.95 * this.settings.exposure;
+    this.bloom.strength = (0.42 + 0.28 * kImp + (post ? 0.18 * Math.exp(-tl * 2.6) : 0)) * this.settings.bloom;
     this.bloom.radius = 0.8;
     this.bloom.threshold = 1.0;
     const pu = this.post.uniforms;
@@ -1031,8 +1127,8 @@ export class IntroEngine {
     pu.uFlash.value = 0;
     pu.uAber.value = 0.0004 + kFx * kFx * 0.004 + (post ? 0.012 * Math.exp(-tl * 2.2) : 0);
     pu.uZoom.value = post ? 0.34 * Math.exp(-tl * 3.0) : 0.07 * k3;
-    pu.uVig.value = 0.5 + 0.1 * (0.5 + 0.5 * Math.sin(t * 0.7)) + 0.12 * k3;
-    pu.uGrain.value = 0.11;
+    pu.uVig.value = (0.5 + 0.1 * (0.5 + 0.5 * Math.sin(t * 0.7)) + 0.12 * k3) * this.settings.vignette;
+    pu.uGrain.value = 0.11 * this.settings.grain;
     pu.uFade.value = warm ? 1 : 1 - smoothstep(0.6, 3.4, t);
     pu.uShockR.value = post ? tl * 0.78 : 0;
     pu.uShockAmp.value = post ? Math.exp(-tl * 1.7) : 0;
@@ -1044,6 +1140,7 @@ export class IntroEngine {
     pu.uRays.value = post
       ? smoothstep(2.0, 3.8, tl) * (0.6 + 0.4 * Math.exp(-Math.pow((tl - 4.0) / 0.9, 2))) * (1 - 0.35 * smoothstep(4, 9, tl))
       : 0;
+    pu.uRays.value *= this.settings.rays;
 
     if (warm) return;
 
@@ -1075,7 +1172,6 @@ export class IntroEngine {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.onResize);
-    window.removeEventListener("pointermove", this.onPointer);
     this.renderer.domElement.removeEventListener("webglcontextlost", this.onContextLost);
     this.renderer.domElement.removeEventListener("webglcontextrestored", this.onContextRestored);
     document.removeEventListener("visibilitychange", this.onVisibility);
@@ -1092,6 +1188,7 @@ export class IntroEngine {
         mat.dispose();
       }
     });
+    for (const video of this.videos) { video.pause(); video.removeAttribute("src"); video.load(); }
     this.logoMaterial.map?.dispose();
     this.composer.dispose();
     this.renderer.dispose();

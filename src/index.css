@@ -1,6 +1,12 @@
 @import "tailwindcss";
-@import "@fontsource/cinzel/latin-600.css";
+@import "@fontsource/prata/cyrillic-400.css";
+@import "@fontsource/prata/latin-400.css";
+@import "@fontsource/forum/cyrillic-400.css";
+@import "@fontsource/forum/latin-400.css";
 @import "@fontsource/inter/latin-300.css";
+@import "@fontsource/inter/cyrillic-300.css";
+@import "@fontsource/inter/cyrillic-500.css";
+@import "@fontsource/inter/cyrillic-700.css";
 @import "@fontsource/inter/latin-500.css";
 @import "@fontsource/inter/latin-700.css";
 
@@ -38,54 +44,12 @@ canvas {
   touch-action: none;
 }
 
-/* ------------------------------------------------------------ opening title card */
-.card {
-  position: absolute;
-  inset: 0;
-  z-index: 16;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-.card-title {
-  font-family: "Cinzel", Georgia, serif;
-  font-weight: 600;
-  font-size: clamp(14px, 1.7vw, 28px);
-  letter-spacing: 0.62em;
-  padding-left: 0.62em;
-  color: #f3d79a;
-  opacity: 0;
-  will-change: transform, opacity;
-}
-.card-line {
-  width: min(34vw, 460px);
-  height: 1px;
-  margin: clamp(14px, 1.8vw, 28px) 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 205, 110, 0.95) 50%, transparent);
-  transform-origin: center;
-  transform: scaleX(0);
-  opacity: 0;
-  will-change: transform, opacity;
-}
-.card-sub {
-  font-family: "Inter", system-ui, sans-serif;
-  font-weight: 300;
-  font-size: clamp(9px, 0.8vw, 13px);
-  letter-spacing: 0.7em;
-  padding-left: 0.7em;
-  color: rgba(255, 220, 160, 0.9);
-  opacity: 0;
-  will-change: transform, opacity;
-}
-
 /* ------------------------------------------------------------ brand */
 .brand-wrap {
   position: absolute;
   left: 0;
   right: 0;
-  top: 49%;
+  top: var(--title-position, 49%);
   z-index: 12;
   display: flex;
   flex-direction: column;
@@ -108,8 +72,8 @@ canvas {
 .brand {
   display: flex;
   justify-content: center;
-  font-family: "Cinzel", "Trajan Pro", Georgia, serif;
-  font-weight: 600;
+  font-family: var(--title-font, "Prata", serif);
+  font-weight: 400;
   font-size: clamp(28px, 5.4vw, 92px);
   line-height: 1.12;
   letter-spacing: 0.4em;
@@ -117,14 +81,14 @@ canvas {
   filter: drop-shadow(0 0 18px rgba(255, 170, 40, 0.45));
 }
 .brand-long {
-  font-size: clamp(24px, 4.5vw, 76px);
-  letter-spacing: 0.16em;
-  padding-left: 0.16em;
+  font-size: calc(clamp(22px, 4.35vw, 72px) * var(--title-size, 1));
+  letter-spacing: var(--title-spacing, 0.055em);
+  padding-left: var(--title-spacing, 0.055em);
 }
 .glyph {
   display: inline-block;
   opacity: 0;
-  background: linear-gradient(180deg, #fff6d6 0%, #ffe3a0 30%, #f0b24a 62%, #c98a22 100%);
+  background: linear-gradient(180deg, var(--title-light, #fff6d6) 0%, var(--title-mid, #ffe3a0) 30%, var(--title-gold, #f0b24a) 62%, var(--title-dark, #c98a22) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -149,12 +113,12 @@ canvas {
 
 .tagline {
   margin-top: clamp(10px, 1.4vw, 22px);
-  font-family: "Inter", system-ui, sans-serif;
-  font-weight: 300;
-  font-size: clamp(13px, 1.5vw, 21px);
-  letter-spacing: 0.34em;
-  padding-left: 0.34em;
-  color: rgba(255, 224, 168, 0.95);
+  font-family: var(--subtitle-font, "Forum", serif);
+  font-weight: 400;
+  font-size: calc(clamp(13px, 1.5vw, 21px) * var(--subtitle-size, 1));
+  letter-spacing: var(--subtitle-spacing, 0.34em);
+  padding-left: var(--subtitle-spacing, 0.34em);
+  color: var(--subtitle-color, #ffe0a8);
   white-space: pre;
   opacity: 0;
   will-change: transform, opacity;
@@ -186,16 +150,6 @@ canvas {
   box-shadow: 0 0 30px rgba(255, 170, 40, 0.35);
 }
 
-/* equaliser bars scale (compositor-only) instead of animating height */
-@keyframes eq {
-  from {
-    transform: scaleY(0.25);
-  }
-  to {
-    transform: scaleY(1);
-  }
-}
-
 /* ------------------------------------------------------------ letterbox (scaleY only: compositor-friendly) */
 .letterbox {
   position: absolute;
@@ -215,119 +169,120 @@ canvas {
   bottom: 0;
   transform-origin: bottom center;
 }
-.card {
-  z-index: 15;
-}
-.card-title,
-.card-sub,
-.card-line {
-  text-shadow: 0 0 22px rgba(255, 170, 40, 0.35);
-}
+/* Player chrome is never part of a rendered film frame. */
+.export-mode .player-ui { display: none !important; }
 
-/* ------------------------------------------------------------ chapter counter */
-@keyframes chapter-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-    filter: blur(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    filter: blur(0);
-  }
-}
-.chapter-num {
-  animation: chapter-in 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-}
-
-/* ------------------------------------------------------------ sound control */
-.sound-btn {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 94px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 205, 110, 0.35);
-  background: rgba(0, 0, 0, 0.4);
-  color: rgba(255, 224, 160, 0.9);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
-}
-.sound-btn:hover {
-  border-color: rgba(255, 215, 130, 0.85);
-}
-.sound-btn.is-on {
-  border-color: rgba(255, 215, 130, 0.7);
-  box-shadow: 0 0 22px rgba(255, 170, 40, 0.25);
-}
-.eq {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 10px;
-}
-.eq i {
-  display: block;
-  width: 2px;
-  height: 100%;
-  border-radius: 1px;
-  background: currentColor;
-  transform-origin: bottom;
-  transform: scaleY(0.25);
-  animation: eq 0.9s ease-in-out infinite alternate;
-  animation-play-state: paused;
-}
-.sound-btn:not(.is-on) .eq i {
-  animation: none;
-  transform: scaleY(0.25);
-  opacity: 0.5;
-}
-@keyframes hint-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(255, 190, 80, 0.35);
-  }
-  50% {
-    box-shadow: 0 0 0 10px rgba(255, 190, 80, 0);
-  }
-}
-.sound-hint {
+/* Export controls are separate from the film and never rendered into a frame. */
+.export-panel {
   position: absolute;
-  top: calc(7.2% + 14px);
-  right: 3vw;
-  z-index: 21;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
+  z-index: 25;
+  right: 3%;
+  top: max(18px, 4%);
+  width: min(320px, 85%);
+  text-align: right;
+  color: #f4daa5;
+  font: 500 10px/1.5 "Inter", sans-serif;
+  letter-spacing: .08em;
+}
+.export-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.export-button, .export-download {
+  border: 1px solid rgba(236, 194, 117, .5);
+  background: rgba(15, 9, 4, .86);
   border-radius: 999px;
-  border: 1px solid rgba(255, 205, 110, 0.4);
-  background: rgba(10, 5, 0, 0.5);
-  backdrop-filter: blur(6px);
-  color: rgba(255, 224, 160, 0.95);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.22em;
+  color: #f8dda5;
+  padding: 9px 15px;
+  text-decoration: none;
+  letter-spacing: .12em;
   cursor: pointer;
-  animation: hint-pulse 2.2s ease-in-out infinite;
-  transition: opacity 0.8s;
+  backdrop-filter: blur(8px);
 }
-.sound-hint-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #ffcf6e;
-  box-shadow: 0 0 10px #ffb830;
+.export-button:hover:not(:disabled), .export-download:hover { border-color: #ffe2a3; background: rgba(88, 55, 15, .8); }
+.export-button:disabled { cursor: wait; opacity: .72; }
+.export-status:not(:empty) {
+  margin: 8px 0 0 auto;
+  padding: 10px 13px;
+  border: 1px solid rgba(236, 194, 117, .22);
+  border-radius: 10px;
+  background: rgba(15, 9, 4, .9);
+  text-align: left;
+  overflow-wrap: anywhere;
 }
-@media (prefers-reduced-motion: reduce) {
-  .sound-hint {
-    animation: none;
-  }
+.export-status small { color: rgba(245, 218, 163, .68); }
+.export-progress { height: 3px; background: rgba(238, 202, 137, .2); margin: 7px 0; border-radius: 2px; overflow: hidden; }
+.export-progress span { display: block; height: 100%; background: #edc57d; transition: width .3s; }
+.export-error { color: #ffc0a6; max-height: 140px; overflow: auto; white-space: pre-wrap; }
+
+/* The decorative rings belong to the film, not to the controls. */
+.corner-rings {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 15;
+  pointer-events: none;
 }
+
+/* The last fade covers the entire film but never the player controls. */
+.film-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 16;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* A compact, draggable control palette, outside the film compositor. */
+.settings-dock { position: fixed; z-index: 30; display: flex; align-items: flex-start; gap: 5px; color: #efe1c8; font-family: "Inter", sans-serif; }
+.settings-trigger { display: grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; border: 1px solid #e3bb7759; border-radius: 50%; color: #e7c98f; background: #14100eeb; cursor: pointer; }
+.settings-trigger svg { width: 15px; height: 15px; }
+.settings-trigger:hover, .settings-trigger:focus-visible { border-color: #e8c68a; outline: none; }
+.settings-trigger span { font-size: 20px; line-height: 1; }
+.settings-panel { width: min(250px, calc(100vw - 42px)); max-height: min(58vh, 430px); display: flex; flex-direction: column; border: 1px solid #e2be8440; border-radius: 9px; background: #15120ff5; box-shadow: 0 12px 36px #000a; overflow: hidden; }
+.settings-panel header { min-height: 34px; padding: 0 9px; display: flex; align-items: center; justify-content: space-between; gap: 6px; border-bottom: 1px solid #ffffff14; }
+.settings-panel header button { border: 0; background: transparent; cursor: pointer; }
+.settings-handle { color: #e9d6b7; font-size: 11px; font-weight: 500; flex: 1; text-align: left; padding: 7px 0; cursor: grab !important; touch-action: none; user-select: none; }
+.settings-handle:active { cursor: grabbing !important; }
+.settings-handle span { color: #b89663; font-size: 16px; margin-right: 5px; }
+.settings-handle:focus-visible, .settings-reset:focus-visible { outline: 1px solid #d9b77d; }
+.settings-reset { color: #bda77f; font-size: 9px; padding: 6px 0; }
+.settings-reset:hover { color: #fff; }
+.settings-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #735b39 transparent; }
+.settings-scroll details { border-bottom: 1px solid #ffffff10; }
+.settings-scroll summary { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; cursor: pointer; color: #e2d2ba; font-size: 10px; font-weight: 500; list-style: none; }
+.settings-scroll summary::-webkit-details-marker { display: none; }
+.settings-scroll summary::after { content: '+'; color: #b89764; font-size: 14px; font-weight: 300; }
+.settings-scroll details[open] summary::after { content: '−'; }
+.setting-group { display: grid; gap: 8px; padding: 0 10px 11px; }
+.setting-text { display: grid; gap: 4px; color: #bfb09a; font-size: 10px; }
+.setting-text input, .setting-text select, .video-setting select { width: 100%; height: 28px; border: 1px solid #ffffff1e; border-radius: 4px; padding: 0 6px; background: #ffffff09; color: #f3e7d5; font-size: 10px; outline: none; }
+.setting-text select option, .video-setting select option { color: #eee; background: #211b15; }
+.setting-text input:focus, .setting-text select:focus, .video-setting select:focus { border-color: #c59b5c; }
+.setting-range { display: grid; gap: 4px; font-size: 10px; color: #cfc1ad; }
+.setting-range span { display: flex; justify-content: space-between; gap: 8px; }
+.setting-range output { color: #af9061; font-variant-numeric: tabular-nums; }
+.setting-range input { appearance: none; width: 100%; height: 3px; margin: 4px 0; border-radius: 3px; background: #695b47; accent-color: #d7b378; cursor: pointer; }
+.setting-range input::-webkit-slider-thumb { appearance: none; width: 11px; height: 11px; border: 2px solid #e4c38c; border-radius: 50%; background: #30271d; }
+.setting-range input::-moz-range-thumb { width: 8px; height: 8px; border: 2px solid #e4c38c; border-radius: 50%; background: #30271d; }
+.setting-toggle, .setting-color { display: flex; justify-content: space-between; align-items: center; gap: 7px; color: #cfc1ad; font-size: 10px; }
+.setting-toggle input { accent-color: #d5b275; width: 14px; height: 14px; }
+.setting-color input { width: 28px; height: 21px; background: transparent; border: 1px solid #ffffff30; border-radius: 4px; padding: 1px; cursor: pointer; }
+.setting-colors { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; }
+.video-setting { display: flex; align-items: center; gap: 7px; color: #b79b72; font: 10px ui-monospace, monospace; }
+.settings-panel .setting-note { margin: 0; color: #8f8371; font-size: 9px; line-height: 1.4; }
+.settings-panel footer { padding: 6px 10px; color: #897e6e; font-size: 9px; border-top: 1px solid #ffffff10; }
+
+/* Completed MP4 lives in a viewport-wide viewer, not in the composition. */
+.export-viewer { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; background: #080706; color: #f3e7d4; font-family: "Inter", sans-serif; }
+.export-viewer-bar { min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 24px; background: #15120f; border-bottom: 1px solid #ffffff18; }
+.export-viewer-label { display: flex; flex-direction: column; gap: 5px; font-size: 10px; letter-spacing: .15em; }
+.export-viewer-label strong { color: #dec08b; font-size: 11px; font-weight: 500; }
+.export-viewer-label span { color: #a99a84; font-size: 9px; letter-spacing: .04em; }
+.export-viewer-actions { display: flex; align-items: center; gap: 8px; }
+.export-viewer-actions button, .export-viewer-download { display: grid; place-items: center; min-height: 36px; border: 1px solid #e5bc7860; border-radius: 6px; color: #f0d7a5; background: #ffffff09; cursor: pointer; text-decoration: none; }
+.export-viewer-actions button { width: 36px; font-size: 22px; line-height: 1; }
+.export-viewer-actions button:hover, .export-viewer-download:hover { background: #ffffff18; border-color: #e6c892; }
+.export-viewer-download { padding: 0 14px; font-size: 10px; letter-spacing: .08em; white-space: nowrap; }
+.export-viewer-video { min-height: 0; flex: 1; width: 100%; object-fit: contain; background: #000; }
+.export-viewer-hint { padding: 9px 20px; text-align: center; font-size: 10px; color: #a99a84; }
+@media (max-width: 600px) { .settings-panel { max-height: min(70vh, 430px); } .export-viewer-bar { padding: 8px 10px; } .export-viewer-label span { display: none; } .export-viewer-actions { gap: 5px; } .export-viewer-download { padding: 0 8px; font-size: 9px; } }

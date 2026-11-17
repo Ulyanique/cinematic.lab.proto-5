@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import Delaunator from "delaunator";
-import { clamp, lerp, mulberry32, smoothstep, terrainHeight } from "./math";
+import { lerp, mulberry32, smoothstep, terrainHeight } from "./math";
 
 type V3 = THREE.Vector3;
 const v3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -377,15 +377,14 @@ export function buildHero(seed: number): HeroData {
   const nrm = v3().subVectors(b1, b0).cross(v3().subVectors(t0, b0)).normalize();
   const off = nrm.clone().multiplyScalar(0.06);
   const P = [b0, b1, t1, t0].map((p) => p.clone().add(off));
-  // Use a square-ish active screen area centered on the facade instead of stretching
-  // a tall full-height panel; the surrounding monolith remains visible as a frame.
+  // Fit a horizontal 16:9 screen inside the tall facade, leaving a stone frame.
   const sideL = P[3].clone().sub(P[0]);
   const sideR = P[2].clone().sub(P[1]);
   const sideLLen = sideL.length();
   const sideRLen = sideR.length();
   const spanBottom = P[1].distanceTo(P[0]);
   const spanTop = P[2].distanceTo(P[3]);
-  const panelH = Math.min((spanBottom + spanTop) * 0.5, sideLLen, sideRLen);
+  const panelH = Math.min((spanBottom + spanTop) * 0.5 * 9 / 16, sideLLen, sideRLen);
   const insetL = (sideLLen - panelH) / (2 * sideLLen);
   const insetR = (sideRLen - panelH) / (2 * sideRLen);
   const bottomL = P[0].clone();
@@ -414,7 +413,7 @@ export function buildHero(seed: number): HeroData {
   screen.setAttribute("aScr", new THREE.Float32BufferAttribute(ss, 3));
   screen.computeBoundingSphere();
 
-  const aspect = clamp(((wbot + wtop) / 2) / Math.hypot(H, skew.z * (1 - taper)), 1.0, 1.25);
+  const aspect = (P[1].distanceTo(P[0]) + P[2].distanceTo(P[3])) / (2 * panelH);
   return {
     body: soup.build(),
     screen,

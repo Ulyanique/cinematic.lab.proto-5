@@ -11,7 +11,12 @@ export const TL = {
   explode: 31.5,
   logoText: 34.9,
   tagline: 36.3,
-  end: 43.5,
+  finalSettle: 43.5,
+  exitStart: 47.8,
+  exitEnd: 50.7,
+  fadeOutStart: 49.6,
+  fadeOutEnd: 51,
+  end: 51.5,
 };
 
 export const HERO_COUNT = 10;
@@ -163,8 +168,8 @@ export const FINAL = {
 export const BLAST_POS = V(0, 5.6, 0);
 export const LOGO_POS = V(0, 5.8, 0);
 
-export function sampleCamera(t: number, out: CamState) {
-  sampleRaw(t, out);
+export function sampleCamera(t: number, out: CamState, drift = 1) {
+  sampleRaw(t, out, drift);
   if (t < TL.explode) out.pos.y += liftAt(t);
 
   // From the first monolith visit onward, keep the camera inside the ring of towers.
@@ -181,7 +186,7 @@ export function sampleCamera(t: number, out: CamState) {
   return out;
 }
 
-function sampleRaw(t: number, out: CamState) {
+function sampleRaw(t: number, out: CamState, drift = 1) {
   const tl = t - TL.explode;
   if (tl >= 0) {
     const last = KEYS[NK - 1];
@@ -198,8 +203,8 @@ function sampleRaw(t: number, out: CamState) {
     out.roll = 0;
     // slow cinematic push-in with a hint of sway while the logo shines (all C1-continuous)
     out.pos.z -= sstep((tl - 2) / 14) * 1.6;
-    out.pos.x += Math.sin(tl * 0.35) * 0.5 * sstep(tl / 5);
-    out.pos.y += Math.sin(tl * 0.27) * 0.18 * sstep(tl / 5);
+    out.pos.x += Math.sin(tl * 0.35) * 0.5 * sstep(tl / 5) * drift;
+    out.pos.y += Math.sin(tl * 0.27) * 0.18 * sstep(tl / 5) * drift;
     return out;
   }
   let i = 0;
