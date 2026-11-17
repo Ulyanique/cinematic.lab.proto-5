@@ -1,4 +1,5 @@
 // All GLSL used by the intro lives here.
+import { VIDEO_STYLE_GLSL } from './videoStyles';
 
 export const NOISE = /* glsl */ `
 float h31(vec3 p){ p=fract(p*0.3183099+.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
@@ -186,6 +187,10 @@ uniform float uTime;
 uniform float uOn;
 uniform float uFocus;
 uniform float uAspect;
+uniform float uMediaAspect;
+uniform float uVideoBrightness;
+uniform float uVideoStyle;
+uniform float uVideoStyleStrength;
 uniform float uSeed;
 uniform float uBlastLight;
 uniform vec3 uBlastPos;
@@ -194,10 +199,10 @@ uniform float uFogDensity;
 uniform float uDim;
 ${NOISE}
 ${ENV}
+${VIDEO_STYLE_GLSL}
 void main(){
   float u=vScr.x/vScr.y;
   float v=vScr.z;
-  vec2 uv=vec2(u,v);
   if(u<0.||u>1.) discard;
 
   // CRT-style power on: a line grows horizontally, then opens vertically
@@ -210,24 +215,11 @@ void main(){
   float mW=1.-smoothstep(halfW-0.01,halfW+0.01,abs(u-0.5));
   float m=mH*mW*step(0.001,uOn);
 
-  // living plasma "video"
-  vec2 q=vec2(u*uAspect*3.2,v*3.2);
-  float t=uTime*0.22+uSeed*10.;
-  float n1=fbm3(vec3(q*1.1,t));
-  float n2=fbm3(vec3(q*2.1+n1*1.6,t*1.4+4.));
-  float sweep=smoothstep(0.0,1.0,sin(v*5.+uTime*0.7+uSeed*6.)*0.5+0.5);
-  float lum=pow(n2,1.7)*1.6+sweep*0.12;
-  vec3 deep=vec3(0.045,0.018,0.004);
-  vec3 amber=vec3(0.95,0.45,0.08);
-  vec3 pale=vec3(1.0,0.86,0.55);
-  vec3 plasma=mix(deep,amber,clamp(lum,0.,1.));
-  plasma=mix(plasma,pale,clamp(lum-0.75,0.,1.));
-  // vertical gradient: darker top, glow bottom
-  plasma*=0.55+0.7*pow(1.-v,1.4);
-
-  vec4 tex=texture2D(uTex,uv);
-  vec3 col=plasma*0.85;
-  col=mix(col,tex.rgb*1.5,tex.a);
+  // Fit 16:9 footage inside the near-square facade without cropping or stretching.
+  float mediaY=(v-0.5)*uMediaAspect/uAspect+0.5;
+  vec4 tex=texture2D(uTex,vec2(u,clamp(mediaY,0.0,1.0)));
+  vec3 col=vec3(0.008,0.004,0.002);
+  if(mediaY>=0.0 && mediaY<=1.0) col=gradeVideo(tex.rgb,vec2(u,mediaY),uTime,uVideoStyle,uVideoStyleStrength)*1.25*uVideoBrightness;
 
   // scan lines + gentle flicker
   float ph=fwidth(v)*820.;
@@ -352,6 +344,7 @@ attribute vec3 aDir;
 attribute vec3 aInfo; // speed, rand, size
 uniform float uT;
 uniform float uImplode;
+uniform float uPower;
 uniform vec3 uCenter;
 uniform float uPx;
 uniform float uTime;
@@ -402,7 +395,7 @@ void main(){
   vAngle=atan(motion.y,motion.x);
   float d=max(-mv.z,0.5);
   gl_PointSize=clamp(sz*uPx*(62./d),1.,28.*uPx);
-  vA=a;
+  vA=a*uPower;
   vHeat=heat;
   vRand=rnd;
 }
@@ -691,8 +684,8 @@ void main(){
   q.x*=uAspect*0.75;
   float vig=1.-uVig*smoothstep(0.22,0.95,length(q)*1.3);
   col*=vig;
-  // ---- 35mm grain: luminance-weighted, slightly softened over two hashes, 24 fps cadence
-  float fr=floor(uTime*24.);
+  // ---- 35mm grain: luminance-weighted, slightly softened over two hashes, 30 fps cadence
+  float fr=floor(uTime*30.);
   float g1=hash(vUv*vec2(1920.,1080.)+fr*17.31);
   float g2=hash(vUv*vec2(960.,540.)+fr*5.17+3.7);
   float grain=(g1*0.65+g2*0.35)-.5;

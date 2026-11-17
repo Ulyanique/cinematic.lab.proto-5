@@ -15,6 +15,7 @@ uniform float uViewH;    // drawing buffer height in px
 uniform float uPower;    // global strength
 uniform vec3 uOrigin;
 uniform vec3 uLogo;
+uniform float uLogoScale;
 varying float vInt;
 varying float vHot;
 varying float vSettle;
@@ -32,7 +33,7 @@ void main(){
   float rad = length(aTarget.xy) / 2.4;
   float delay = 0.45 + aRand.x * 0.95 + rad * 0.35;
   float k = easeOut3((uT - delay) / 1.55);
-  vec3 tgt = uLogo + aTarget;
+  vec3 tgt = uLogo + aTarget * uLogoScale;
 
   vec3 p = mix(burst, tgt, k);
   // curved, swirling flight path instead of a straight line
@@ -94,6 +95,7 @@ export class LogoDust {
   readonly material: THREE.ShaderMaterial;
   private geometry = new THREE.BufferGeometry();
   private ready = false;
+  readonly readyPromise: Promise<void>;
 
   constructor(
     logoUrl: string,
@@ -118,6 +120,7 @@ export class LogoDust {
         uPower: { value: 1 },
         uOrigin: { value: origin.clone() },
         uLogo: { value: logoPos.clone() },
+        uLogoScale: { value: 1 },
       },
     });
     // placeholder so the object is valid before the image has been sampled
@@ -128,11 +131,13 @@ export class LogoDust {
     this.points.frustumCulled = false;
     this.points.renderOrder = 12;
     this.points.visible = false;
-    this.sample(logoUrl, count);
+    this.readyPromise = this.sample(logoUrl, count);
   }
 
-  private sample(url: string, count: number) {
+  private sample(url: string, count: number): Promise<void> {
+    return new Promise((resolve, reject) => {
     const img = new Image();
+    img.onerror = () => reject(new Error("Не удалось загрузить изображение логотипа"));
     img.onload = () => {
       const W = 300;
       const H = Math.round((W * LOGO_H) / LOGO_W);
@@ -140,13 +145,13 @@ export class LogoDust {
       cv.width = W;
       cv.height = H;
       const g = cv.getContext("2d", { willReadFrequently: true });
-      if (!g) return;
+      if (!g) { reject(new Error("Canvas недоступен для частиц логотипа")); return; }
       g.drawImage(img, 0, 0, W, H);
       const data = g.getImageData(0, 0, W, H).data;
       const solid: number[] = [];
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (data[(y * W + x) * 4 + 3] > 140) solid.push(x, y);
       const n = solid.length / 2;
-      if (n === 0) return;
+      if (n === 0) { reject(new Error("Логотип не содержит видимых пикселей")); return; }
       const rand = mulberry32(424242);
       const target = new Float32Array(count * 3);
       const rnd = new Float32Array(count * 4);
@@ -167,8 +172,10 @@ export class LogoDust {
       this.geometry.setAttribute("aRand", new THREE.BufferAttribute(rnd, 4));
       this.geometry.computeBoundingSphere();
       this.ready = true;
+      resolve();
     };
     img.src = url;
+    });
   }
 
   /** tl = seconds since the blast (<0 hides everything). */

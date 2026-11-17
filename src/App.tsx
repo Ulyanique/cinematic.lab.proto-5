@@ -1,11 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { IntroEngine, Stage } from "./intro/Engine";
-import { HERO_COUNT, TL } from "./intro/timeline";
-import { Score } from "./intro/audio";
+import { ExportPanel } from "./ExportPanel";
+import { SettingsPanel } from "./SettingsPanel";
+import { loadSettings, saveSettings, type FilmSettings } from "./intro/settings";
+import { captureOverlay } from "./intro/captureOverlay";
+import { drawCornerRings } from "./intro/cornerRings";
+import { TL } from "./intro/timeline";
+import { glyphExit, subtitleExit } from "./intro/finalExit";
 import { clamp, easeInOutCubic, easeOutCubic, lerp, smoothstep } from "./intro/math";
 
-const BRAND = "ЯНТАРНЫЙ ЦИРКУЛЬ";
-const TAGLINE = "Вечер ретроспектива";
+const exportMode = new URLSearchParams(window.location.search).get("export") === "1";
+
+declare global {
+  interface Window {
+    cinematicExport?: { ready: Promise<void>; renderFrame: (frame: number, fps: number) => Promise<void>; drawFrame: (ctx: CanvasRenderingContext2D) => void; duration: number };
+  }
+}
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const formatTime = (seconds: number) => {
@@ -15,14 +25,24 @@ const formatTime = (seconds: number) => {
   return `${String(minutes).padStart(2, "0")}:${remainder}`;
 };
 
-async function loadFonts() {
+async function loadFonts(settings: FilmSettings) {
   if (!document.fonts) return;
-  const fonts = ['600 40px "Cinzel"', '300 14px "Inter"', '500 14px "Inter"', '700 40px "Inter"'];
-  await Promise.race([Promise.all(fonts.map((f) => document.fonts.load(f).catch(() => []))), wait(3000)]);
+  const fonts = ['400 40px "Prata"', '400 20px "Forum"', '500 40px "Inter"'];
+  const text = settings.title + " " + settings.subtitle;
+  if (exportMode) {
+    await Promise.all(fonts.map((f) => document.fonts.load(f, text)));
+    await document.fonts.ready;
+  } else {
+    await Promise.race([Promise.all(fonts.map((f) => document.fonts.load(f, text).catch(() => []))), wait(3000)]);
+  }
 }
 
 export default function App() {
+  const [settings, setSettings] = useState<FilmSettings>(loadSettings);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const mountRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
   const seekingRef = useRef(false);
@@ -35,19 +55,10 @@ export default function App() {
   const tagRef = useRef<HTMLDivElement>(null);
   const barTopRef = useRef<HTMLDivElement>(null);
   const barBottomRef = useRef<HTMLDivElement>(null);
-  const cardTitleRef = useRef<HTMLDivElement>(null);
-  const cardLineRef = useRef<HTMLDivElement>(null);
-  const cardSubRef = useRef<HTMLDivElement>(null);
-  const scoreRef = useRef<Score | null>(null);
-  const soundRef = useRef(false);
-  const pausedRef = useRef(false);
-  const resyncTimer = useRef<number | null>(null);
-
+  const ringsRef = useRef<HTMLCanvasElement>(null);
+  const fadeRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState<Stage>("approach");
-  const [chapter, setChapter] = useState(0);
   const [paused, setPaused] = useState(false);
-  const [sound, setSound] = useState(false);
-  const [soundHint, setSoundHint] = useState(true);
   const [controlsVisible, setControlsVisible] = useState(true);
   const controlsTimer = useRef<number | null>(null);
 
@@ -73,17 +84,19 @@ export default function App() {
 
   const paint = useCallback((t: number) => {
     // ---- brand reveal: letter by letter, then a light wave runs across the gold
-    const n = BRAND.length;
+    const settings = settingsRef.current;
+    const n = Array.from(settings.title).length;
     const sweepT = t - (TL.logoText + 2.6);
     const sweepPos = sweepT > 0 && sweepT % 7 < 2 ? -2 + ((sweepT % 7) / 2) * (n + 4) : -99;
     for (let i = 0; i < n; i++) {
       const el = letterRefs.current[i];
       if (!el) continue;
-      const s = clamp((t - (TL.logoText + i * 0.11)) / 1.25);
+      const s = clamp((t - (TL.logoText + i * 0.11 / settings.revealSpeed)) / (1.25 / settings.revealSpeed));
       const e = easeOutCubic(s);
       const k = Math.exp(-Math.pow((i + 0.5 - sweepPos) / 1.1, 2));
-      el.style.opacity = String(e);
-      el.style.transform = `translate3d(0, ${(1 - e) * 22}px, 0) scale(${1.05 - 0.05 * e})`;
+      const exit = glyphExit(t, i);
+      el.style.opacity = String(e * (1 - exit) * (settings.showTitle ? 1 : 0));
+      el.style.transform = `translate3d(0, ${(1 - e) * 22 - exit * 12 * settings.exitMotion}px, 0) scale(${(1.05 - 0.05 * e) * (1 - Math.min(.8, 0.35 * settings.exitMotion) * exit)})`;
       const blur = (1 - e) * 9;
       const parts: string[] = [];
       if (blur > 0.15) parts.push(`blur(${blur.toFixed(2)}px)`);
@@ -93,37 +106,36 @@ export default function App() {
     // ---- anamorphic letterbox: opens from a black slit, then punches outward with the blast
     const open = easeInOutCubic((t - 0.3) / 3.4);
     const punch = easeOutCubic((t - TL.explode) / 1.6);
-    const bar = lerp(50, 7.2, open) - 4.4 * punch;
+    const bar = (lerp(50, 7.2, open) - 4.4 * punch) * (1 - smoothstep(TL.explode, TL.logoText, t));
     const barT = `scaleY(${(bar / 50).toFixed(4)})`;
     if (barTopRef.current) barTopRef.current.style.transform = barT;
     if (barBottomRef.current) barBottomRef.current.style.transform = barT;
-    // ---- opening card
-    const cardOut = 1 - smoothstep(3.3, 4.6, t);
-    const cin = smoothstep(0.7, 2.1, t);
-    if (cardTitleRef.current) {
-      cardTitleRef.current.style.opacity = String(cin * cardOut);
-      cardTitleRef.current.style.transform = `translate3d(0, ${(1 - cin) * 8}px, 0)`;
-      cardTitleRef.current.style.filter = `blur(${((1 - cin) * 6).toFixed(2)}px)`;
+    if (fadeRef.current) fadeRef.current.style.opacity = String(smoothstep(TL.fadeOutStart, TL.fadeOutEnd, t));
+    const rings = ringsRef.current;
+    const frame = frameRef.current;
+    if (rings && frame) {
+      const width = frame.clientWidth, height = frame.clientHeight;
+      const pr = exportMode ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+      const pw = Math.round(width * pr), ph = Math.round(height * pr);
+      if (rings.width !== pw || rings.height !== ph) { rings.width = pw; rings.height = ph; }
+      const context = rings.getContext("2d");
+      if (context && width > 0 && height > 0) {
+        context.setTransform(pr, 0, 0, pr, 0, 0);
+        drawCornerRings(context, t, width, height, settings);
+      }
     }
-    if (cardLineRef.current) {
-      cardLineRef.current.style.transform = `scaleX(${easeOutCubic((t - 1.0) / 1.8)})`;
-      cardLineRef.current.style.opacity = String(smoothstep(1.0, 1.6, t) * cardOut);
-    }
-    if (cardSubRef.current) {
-      const a = smoothstep(1.7, 3.0, t);
-      cardSubRef.current.style.opacity = String(a * cardOut * 0.9);
-      cardSubRef.current.style.transform = `translate3d(0, ${(1 - a) * 6}px, 0)`;
-    }
-    if (shadeRef.current) shadeRef.current.style.opacity = String(smoothstep(TL.logoText - 0.4, TL.logoText + 1.8, t));
+    if (shadeRef.current) shadeRef.current.style.opacity = String(smoothstep(TL.logoText - 0.4, TL.logoText + 1.8, t) * (settings.showTitle || settings.showSubtitle ? 1 : 0));
     if (ruleRef.current) {
       const r = easeOutCubic((t - (TL.logoText + 1.1)) / 1.5);
-      ruleRef.current.style.transform = `scaleX(${r})`;
-      ruleRef.current.style.opacity = String(smoothstep(TL.logoText + 1.1, TL.logoText + 1.8, t));
+      const exit = subtitleExit(t);
+      ruleRef.current.style.transform = `scaleX(${r * (1 - exit)})`;
+      ruleRef.current.style.opacity = String(smoothstep(TL.logoText + 1.1, TL.logoText + 1.8, t) * (1 - exit) * (settings.showTitle || settings.showSubtitle ? 1 : 0));
     }
     if (tagRef.current) {
       const a = smoothstep(TL.tagline, TL.tagline + 1.8, t);
-      tagRef.current.style.opacity = String(a * 0.85);
-      tagRef.current.style.transform = `translate3d(0, ${(1 - a) * 10}px, 0)`;
+      const exit = subtitleExit(t);
+      tagRef.current.style.opacity = String(a * 0.85 * (1 - exit) * (settings.showSubtitle ? 1 : 0));
+      tagRef.current.style.transform = `translate3d(0, ${(1 - a) * 10 - 8 * exit}px, 0)`;
     }
   }, []);
 
@@ -134,8 +146,8 @@ export default function App() {
     const q = new URLSearchParams(window.location.search).get("t");
     const fixed = q !== null && !Number.isNaN(parseFloat(q)) ? parseFloat(q) : null;
 
-    // fonts first (no swap-flicker, crisp type on the monolith screens), then the heavy WebGL setup
-    void loadFonts().then(() => {
+    // Expose an explicit barrier for frame exporters, including async image/video loads.
+    const ready = loadFonts(settingsRef.current).then(async () => {
       if (cancelled || !mountRef.current) return;
       engine = new IntroEngine(
         mountRef.current,
@@ -145,155 +157,124 @@ export default function App() {
             if (timeRef.current) timeRef.current.textContent = `${formatTime(t)} / ${formatTime(TL.end)}`;
             paint(t);
           },
-          onChapter: setChapter,
           onStage: (next) => {
             setStage(next);
             if (next === "end") {
-              pausedRef.current = true;
               setPaused(true);
             }
           },
         },
-        fixed
+        fixed,
+        settingsRef.current
       );
       engineRef.current = engine;
+      if (exportMode) await engine.ready;
     });
+    const api = {
+      ready,
+      duration: TL.end,
+      renderFrame: async (frame: number, fps: number) => {
+        if (!Number.isInteger(frame) || frame < 0 || !Number.isFinite(fps) || fps <= 0) throw new Error("Некорректный номер кадра или FPS");
+        await ready;
+        if (!engine) throw new Error("Движок не готов");
+        await engine.renderFrame(frame / fps);
+      },
+      drawFrame: (ctx: CanvasRenderingContext2D) => {
+        if (!engine || !frameRef.current) throw new Error("Движок не готов");
+        const canvas = engine.canvas;
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        ctx.save();
+        ctx.filter = `hue-rotate(${settingsRef.current.hue}deg) saturate(${settingsRef.current.saturation})`;
+        ctx.drawImage(canvas, 0, 0, ctx.canvas.width, ctx.canvas.height);
+        ctx.restore();
+        ctx.save();
+        ctx.scale(ctx.canvas.width / frameRef.current.clientWidth, ctx.canvas.height / frameRef.current.clientHeight);
+        captureOverlay(ctx, frameRef.current);
+        ctx.restore();
+      },
+    };
+    if (exportMode) window.cinematicExport = api;
+    void ready.catch(error => console.error("Ошибка подготовки ролика:", error));
 
     return () => {
       cancelled = true;
+      if (window.cinematicExport === api) delete window.cinematicExport;
       engine?.dispose();
       engineRef.current = null;
     };
   }, [paint]);
 
-  // ---------------------------------------------------------------- score (procedural audio)
-  const startScore = useCallback(() => {
+  useLayoutEffect(() => {
     const engine = engineRef.current;
-    if (!engine || !soundRef.current) return;
-    scoreRef.current ??= new Score();
-    scoreRef.current.start(engine.time, () => engine.time);
-  }, []);
+    if (engine) engine.setSettings(settings);
+    if (engine) paint(engine.time);
+  }, [settings, paint]);
 
-  const stopScore = useCallback(() => {
-    scoreRef.current?.stop();
-  }, []);
-
-  const toggleSound = useCallback(() => {
-    const next = !soundRef.current;
-    soundRef.current = next;
-    setSound(next);
-    setSoundHint(false);
-    if (next && !pausedRef.current) startScore();
-    else stopScore();
-  }, [startScore, stopScore]);
+  const updateSettings = (next: FilmSettings) => {
+    saveSettings(next);
+    setSettings(next);
+  };
 
   const togglePlayback = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return;
     if (engine.isPaused) {
       engine.resume();
-      pausedRef.current = false;
       setPaused(false);
-      startScore();
     } else {
       engine.pause();
-      pausedRef.current = true;
       setPaused(true);
-      stopScore();
     }
-  }, [startScore, stopScore]);
+  }, []);
 
   const replay = useCallback(() => {
     engineRef.current?.restart();
-    pausedRef.current = false;
     setPaused(false);
-    setChapter(0);
-    startScore();
-  }, [startScore]);
-
-  const resyncAudioSoon = useCallback(() => {
-    if (!soundRef.current) return;
-    stopScore();
-    if (resyncTimer.current !== null) window.clearTimeout(resyncTimer.current);
-    resyncTimer.current = window.setTimeout(() => {
-      if (!seekingRef.current && !pausedRef.current) startScore();
-    }, 260);
-  }, [startScore, stopScore]);
+  }, []);
 
   useEffect(() => {
-    const hint = window.setTimeout(() => setSoundHint(false), 11000);
     const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof Element && e.target.closest(".settings-panel, .export-viewer")) return;
       if (e.target instanceof HTMLInputElement && e.key !== " ") return;
       if (e.code === "Space") {
         e.preventDefault();
         if (engineRef.current && !(engineRef.current.time >= TL.end)) togglePlayback();
-      } else if (e.key === "m" || e.key === "M" || e.key === "ь" || e.key === "Ь") {
-        toggleSound();
       } else if (e.key === "f" || e.key === "F" || e.key === "а" || e.key === "А") {
         if (document.fullscreenElement) void document.exitFullscreen();
         else void document.documentElement.requestFullscreen?.().catch(() => undefined);
       }
     };
-    const onVis = () => {
-      if (document.hidden) stopScore();
-      else if (!pausedRef.current) startScore();
-    };
     window.addEventListener("keydown", onKey);
-    document.addEventListener("visibilitychange", onVis);
-    return () => {
-      window.clearTimeout(hint);
-      window.removeEventListener("keydown", onKey);
-      document.removeEventListener("visibilitychange", onVis);
-      if (resyncTimer.current !== null) window.clearTimeout(resyncTimer.current);
-      scoreRef.current?.stop();
-    };
-  }, [togglePlayback, toggleSound, startScore, stopScore]);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [togglePlayback]);
 
   return (
     <div
-      className="app-shell fixed inset-0 grid place-items-center overflow-hidden bg-black select-none"
+      className={"app-shell fixed inset-0 grid place-items-center overflow-hidden bg-black select-none" + (exportMode ? " export-mode" : "")}
       style={{ cursor: controlsVisible ? "default" : "none" }}
     >
-      <div className="cinema-frame">
-      <div ref={mountRef} className="absolute inset-0" />
+      <div ref={frameRef} className="cinema-frame" style={{
+        '--title-font': `"${settings.titleFont}", serif`,
+        '--title-size': settings.titleScale * Math.min(1, 19 / Math.max(1, Array.from(settings.title).length)),
+        '--title-spacing': `${settings.titleSpacing}em`,
+        '--subtitle-font': `"${settings.subtitleFont}", serif`, '--subtitle-spacing': `${settings.subtitleSpacing}em`, '--title-position': `${settings.titlePosition}%`,
+        '--subtitle-size': settings.subtitleScale * Math.min(1, 25 / Math.max(1, Array.from(settings.subtitle).length)),
+        '--title-light': settings.titleLight, '--title-mid': settings.titleMid, '--title-gold': settings.titleGold, '--title-dark': settings.titleDark,
+        '--subtitle-color': settings.subtitleColor,
+      } as CSSProperties}>
+      <div ref={mountRef} className="absolute inset-0" style={{ filter: `hue-rotate(${settings.hue}deg) saturate(${settings.saturation})` }} />
 
       {/* anamorphic letterbox */}
       <div ref={barTopRef} className="letterbox letterbox-top" />
       <div ref={barBottomRef} className="letterbox letterbox-bottom" />
 
-      {/* opening card */}
-      <div className="card" aria-hidden="true">
-        <div ref={cardTitleRef} className="card-title">
-          CINEMATIC LAB
-        </div>
-        <div ref={cardLineRef} className="card-line" />
-        <div ref={cardSubRef} className="card-sub">
-          ПРЕДСТАВЛЯЕТ
-        </div>
-      </div>
-
-      {/* chapter HUD */}
-      <div
-        className="absolute left-[4vw] z-[15] font-mono text-[11px] tracking-[0.35em] text-amber-200/80"
-        style={{ bottom: "56px" }}
-      >
-        <div
-          className="transition-[opacity,transform] duration-500"
-          style={{ opacity: chapter > 0 ? 1 : 0, transform: chapter > 0 ? "translateY(0)" : "translateY(6px)" }}
-        >
-          <span key={chapter} className="chapter-num inline-block text-amber-300">
-            {String(Math.max(chapter, 1)).padStart(2, "0")}
-          </span>
-          <span className="opacity-50"> / {String(HERO_COUNT).padStart(2, "0")}</span>
-          <span className="ml-4 opacity-70">VIDEO</span>
-        </div>
-      </div>
+      <canvas ref={ringsRef} className="corner-rings" aria-hidden="true" />
 
       {/* brand title under the compass – always mounted, painted from the film clock */}
       <div className="brand-wrap">
         <div ref={shadeRef} className="brand-shade" />
-        <div className="brand brand-long" aria-label={BRAND}>
-          {BRAND.split("").map((ch, i) => (
+        <div className="brand brand-long" aria-label={settings.title}>
+          {Array.from(settings.title).map((ch, i) => (
             <span
               key={i}
               ref={(el) => {
@@ -308,24 +289,20 @@ export default function App() {
         </div>
         <div ref={ruleRef} className="brand-rule" />
         <div ref={tagRef} className="tagline">
-          {TAGLINE}
+          {settings.subtitle}
         </div>
       </div>
 
-      {/* first-visit hint: browsers only allow audio after a gesture */}
-      <button
-        type="button"
-        onClick={toggleSound}
-        className="sound-hint"
-        tabIndex={-1}
-        style={{ opacity: soundHint && !sound ? 1 : 0, pointerEvents: soundHint && !sound ? "auto" : "none" }}
-      >
-        <span className="sound-hint-dot" /> ВКЛЮЧИТЬ ЗВУК · M
-      </button>
+      <div ref={fadeRef} className="film-fade" aria-hidden="true" />
+
+      {!exportMode && <ExportPanel settings={settings} onStart={() => {
+        engineRef.current?.pause();
+        setPaused(true);
+      }} />}
 
       {/* seekable film timeline with an explicit seconds readout */}
       <div
-        className="absolute inset-x-[3vw] bottom-[8px] z-20 flex items-center gap-3 transition-opacity duration-500"
+        className="player-ui absolute inset-x-[3vw] bottom-[8px] z-20 flex items-center gap-3 transition-opacity duration-500"
         style={{ opacity: controlsVisible ? 1 : 0, pointerEvents: controlsVisible ? "auto" : "none" }}
       >
         {stage !== "end" && (
@@ -338,22 +315,8 @@ export default function App() {
             {paused ? "ПРОДОЛЖИТЬ" : "ПАУЗА"}
           </button>
         )}
-        <button
-          type="button"
-          onClick={toggleSound}
-          aria-pressed={sound}
-          aria-label={sound ? "Выключить звук" : "Включить звук"}
-          className={"sound-btn" + (sound ? " is-on" : "")}
-        >
-          <span className="eq" aria-hidden="true">
-            {[0, 1, 2, 3].map((i) => (
-              <i key={i} style={{ animationDelay: `${i * -0.23}s`, animationPlayState: sound && !paused ? "running" : "paused" }} />
-            ))}
-          </span>
-          {sound ? "ЗВУК" : "ЗВУК ВЫКЛ"}
-        </button>
         <span ref={timeRef} className="min-w-[92px] font-mono text-[10px] tracking-[0.18em] text-amber-200/80">
-          00:00.0 / 00:43.5
+          00:00.0 / {formatTime(TL.end)}
         </span>
         <input
           ref={progressRef}
@@ -364,14 +327,13 @@ export default function App() {
           step={0.1}
           defaultValue={0}
           onPointerDown={() => { seekingRef.current = true; }}
-          onPointerUp={() => { seekingRef.current = false; resyncAudioSoon(); }}
-          onPointerCancel={() => { seekingRef.current = false; resyncAudioSoon(); }}
+          onPointerUp={() => { seekingRef.current = false; }}
+          onPointerCancel={() => { seekingRef.current = false; }}
           onBlur={() => { seekingRef.current = false; }}
           onInput={(event) => {
             const seconds = Number(event.currentTarget.value);
             if (timeRef.current) timeRef.current.textContent = `${formatTime(seconds)} / ${formatTime(TL.end)}`;
             engineRef.current?.seek(seconds);
-            resyncAudioSoon();
           }}
           className="h-5 min-w-0 flex-1 cursor-pointer accent-amber-300"
         />
@@ -382,6 +344,7 @@ export default function App() {
         )}
       </div>
       </div>
+      {!exportMode && <SettingsPanel settings={settings} onChange={updateSettings} />}
     </div>
   );
 }
