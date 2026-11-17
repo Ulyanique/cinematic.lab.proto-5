@@ -10,6 +10,7 @@ import * as S from "./shaders";
 import { LogoDust, LOGO_H, LOGO_W } from "./logoDust";
 import { logoExit } from "./finalExit";
 import { createAntialiasPass, resizeAntialias } from "./antialias";
+import { videoStyleCode } from "./videoStyles";
 import { DEFAULT_SETTINGS, type FilmSettings } from "./settings";
 import logoUrl from "../assets/logo.svg?inline";
 import {
@@ -270,6 +271,8 @@ export class IntroEngine {
           uAspect: { value: data.aspect },
           uMediaAspect: { value: 16 / 9 },
           uVideoBrightness: { value: 1 },
+          uVideoStyle: { value: 0 },
+          uVideoStyleStrength: { value: 1 },
           uSeed: { value: i * 0.137 },
         },
       });
@@ -1025,6 +1028,8 @@ export class IntroEngine {
       const h = this.heroes[i];
       h.screenMat.uniforms.uTex.value = this.videoTextures[this.settings.videoOrder[i]];
       h.screenMat.uniforms.uVideoBrightness.value = this.settings.videoBrightness;
+      h.screenMat.uniforms.uVideoStyle.value = videoStyleCode(this.settings.videoStyle);
+      h.screenMat.uniforms.uVideoStyleStrength.value = this.settings.videoStyleStrength;
       const rise = clamp((t - riseStart(i)) / TL.riseDur);
       const focus = Math.exp(-Math.pow((t - visitTime(i)) / 0.95, 2));
       if (focus > bestFocus && !post) {

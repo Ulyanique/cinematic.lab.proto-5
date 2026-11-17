@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
 const fixture = `<html><body><script>
+window.parent.__snapshot = JSON.parse(window.name);
 window.cinematicExport={ready:Promise.resolve(),duration:.1,
 renderFrame:async(n)=>{window.n=n},drawFrame(ctx){ctx.fillStyle=['red','green','blue'][window.n];ctx.fillRect(0,0,ctx.canvas.width,ctx.canvas.height)}};
 </script></body></html>`;
@@ -45,12 +46,17 @@ test('compact settings can be moved and the completed export opens, saves, close
     assert.equal(await antialias.isChecked(), true);
     await antialias.uncheck();
     assert.equal(await antialias.isChecked(), false);
+    await page.getByText('Видео · 10 экранов').click();
+    await page.getByLabel('Стиль видео').selectOption('archive');
+    await page.getByRole('slider', { name: 'Сила стиля' }).fill('0.45');
     await page.getByRole('button', { name: 'Настройки композиции' }).click();
 
     await page.route('**/ui-harness?export=1&pr=1', route => route.fulfill({status: 200, contentType: 'text/html', body: fixture}));
     await page.getByRole('button', { name: 'ЭКСПОРТ MP4' }).click();
     const viewer = page.getByRole('dialog', { name: 'Готовое видео' });
     await viewer.waitFor({timeout: 60000});
+    assert.equal(await page.evaluate(() => window.__snapshot.videoStyle), 'archive');
+    assert.equal(await page.evaluate(() => window.__snapshot.videoStyleStrength), 0.45);
     const bounds = await viewer.boundingBox();
     assert.deepEqual(bounds, { x: 0, y: 0, width: 960, height: 720 });
     assert.equal(await viewer.locator('video').getAttribute('controls'), '');

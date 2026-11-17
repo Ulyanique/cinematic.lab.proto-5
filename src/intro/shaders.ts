@@ -1,4 +1,5 @@
 // All GLSL used by the intro lives here.
+import { VIDEO_STYLE_GLSL } from './videoStyles';
 
 export const NOISE = /* glsl */ `
 float h31(vec3 p){ p=fract(p*0.3183099+.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
@@ -188,6 +189,8 @@ uniform float uFocus;
 uniform float uAspect;
 uniform float uMediaAspect;
 uniform float uVideoBrightness;
+uniform float uVideoStyle;
+uniform float uVideoStyleStrength;
 uniform float uSeed;
 uniform float uBlastLight;
 uniform vec3 uBlastPos;
@@ -196,6 +199,7 @@ uniform float uFogDensity;
 uniform float uDim;
 ${NOISE}
 ${ENV}
+${VIDEO_STYLE_GLSL}
 void main(){
   float u=vScr.x/vScr.y;
   float v=vScr.z;
@@ -215,7 +219,7 @@ void main(){
   float mediaY=(v-0.5)*uMediaAspect/uAspect+0.5;
   vec4 tex=texture2D(uTex,vec2(u,clamp(mediaY,0.0,1.0)));
   vec3 col=vec3(0.008,0.004,0.002);
-  if(mediaY>=0.0 && mediaY<=1.0) col=tex.rgb*1.25*uVideoBrightness;
+  if(mediaY>=0.0 && mediaY<=1.0) col=gradeVideo(tex.rgb,vec2(u,mediaY),uTime,uVideoStyle,uVideoStyleStrength)*1.25*uVideoBrightness;
 
   // scan lines + gentle flicker
   float ph=fwidth(v)*820.;
